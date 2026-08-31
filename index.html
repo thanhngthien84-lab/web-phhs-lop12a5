@@ -3509,21 +3509,62 @@ window.openEditGroupModal = function(id) {
             setTimeout(() => document.getElementById('lookup-code-input').focus(), 100);
         }
 
-        function performParentLookup() {
-            const phone = document.getElementById('lookup-code-input').value.replace(/\D/g, "").trim();
+        // API Google Sheets: chỉ trả về dữ liệu của học sinh khớp số điện thoại.
+        const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycby2DMhhv2XxdXZNpXoVUfHTvI8KJJKZFmfA7bdcQPwa_LW4IkwHSoedWP_pQ3533ZCC/exec";
+
+        function lookupParentFromGoogle(phone) {
+            phone = String(phone || "").replace(/\D/g, "");
             if (!phone) return showToast("Vui lòng nhập số điện thoại PHHS", "error");
-            const student = state.students.find(s => String(s.parentPhone || "").replace(/\D/g, "") === phone);
-            if (student) showParentView(student.id); else showToast("Số điện thoại chưa đúng hoặc chưa có trong danh sách!", "error");
+
+            showToast("Đang tải dữ liệu học tập...", "success");
+            const callbackName = "googleSheetCallback_" + Date.now();
+            const script = document.createElement("script");
+            const timeout = setTimeout(() => finish({ ok: false, message: "Không thể kết nối nguồn dữ liệu. Vui lòng thử lại." }), 15000);
+
+            function cleanup() {
+                clearTimeout(timeout);
+                delete window[callbackName];
+                script.remove();
+            }
+
+            function finish(response) {
+                cleanup();
+                if (!response || !response.ok || !response.student) {
+                    return showToast((response && response.message) || "Không tìm thấy dữ liệu học sinh.", "error");
+                }
+
+                const sourceStudent = response.student;
+                const remoteStudent = {
+                    id: "google-" + sourceStudent.studentCode,
+                    studentCode: sourceStudent.studentCode,
+                    name: sourceStudent.name,
+                    parentPhone: sourceStudent.parentPhone,
+                    khoiThi: sourceStudent.khoiThi,
+                    tongDiemMucTieu: sourceStudent.tongDiemMucTieu,
+                    points: 0, stars: 0, group: "", role: "", talent: "", avatarUrl: "", gender: "", history: []
+                };
+                const index = state.students.findIndex(item => String(item.studentCode || "") === String(remoteStudent.studentCode));
+                if (index >= 0) state.students[index] = { ...state.students[index], ...remoteStudent };
+                else state.students.push(remoteStudent);
+
+                state.scores = (response.scores || []).map(item => ({ ...item, studentCode: remoteStudent.studentCode }));
+                state.teacherComments = (response.comments || []).map(item => ({ ...item, studentCode: remoteStudent.studentCode }));
+                window.googleSheetMode = true;
+                window.parentSubject = "Toán";
+                showParentView(remoteStudent.id);
+            }
+
+            window[callbackName] = finish;
+            script.onerror = () => finish({ ok: false, message: "Không thể kết nối nguồn dữ liệu. Vui lòng thử lại." });
+            script.src = GOOGLE_SHEET_API_URL + "?phone=" + encodeURIComponent(phone) + "&callback=" + callbackName;
+            document.head.appendChild(script);
+        }
+
+        function performParentLookup() {
+            lookupParentFromGoogle(document.getElementById('lookup-code-input').value);
         }
 window.performDirectLookup = function() {
-            const phone = document.getElementById('direct-lookup-code').value.replace(/\D/g, "").trim();
-            if (!phone) return showToast("Vui lòng nhập số điện thoại PHHS", "error");
-            const student = state.students.find(s => String(s.parentPhone || "").replace(/\D/g, "") === phone);
-            if (student) {
-                showParentView(student.id);
-            } else {
-                showToast("Số điện thoại chưa đúng hoặc chưa có trong danh sách!", "error");
-            }
+            lookupParentFromGoogle(document.getElementById('direct-lookup-code').value);
         };
         function showParentView(studentId) {
             const student = state.students.find(s => s.id === studentId); if (!student) return;
@@ -3655,7 +3696,7 @@ window.performDirectLookup = function() {
             const dots = points.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="#4f7ff0"/>`).join("");
             return `<style>@media (min-width:768px){#parent-view-modal .grid.grid-cols-2.md\\:grid-cols-4{grid-template-columns:repeat(5,minmax(0,1fr))!important;}}</style><div class="w-full h-72"><svg viewBox="0 0 ${width} ${height}" class="w-full h-full" role="img" aria-label="Biểu đồ điểm ${subject}"><text x="${width / 2}" y="24" text-anchor="middle" fill="#102a56" font-size="20" font-weight="700">Biểu đồ thống kê môn ${subject}</text><text x="${width / 2}" y="41" text-anchor="middle" fill="#94a3b8" font-size="11">Điểm học sinh và xu hướng học tập</text>${grid}<line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${points[0].x}" y1="${trendY(points[0].x)}" x2="${points[points.length - 1].x}" y2="${trendY(points[points.length - 1].x)}" stroke="#75ad77" stroke-width="3" stroke-dasharray="7 6"/><polyline points="${scoreLine}" fill="none" stroke="#4f7ff0" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}${labels}<rect x="${width / 2 - 116}" y="52" width="16" height="10" rx="2" fill="#4f7ff0"/><text x="${width / 2 - 94}" y="61" fill="#475569" font-size="11">Điểm học sinh</text><line x1="${width / 2 + 26}" y1="57" x2="${width / 2 + 48}" y2="57" stroke="#75ad77" stroke-width="3" stroke-dasharray="6 5"/><text x="${width / 2 + 55}" y="61" fill="#475569" font-size="11">Xu hướng</text></svg></div>`;
           })() : '<div class="text-slate-400 italic py-12">Chưa có điểm môn này.</div>';
-          const table = rows.length ? rows.map((x,i) => { const all=(state.scores||[]).filter(y=>y.subject===subject&&y.title===x.title); const ca=all.length?(all.reduce((a,y)=>a+y.score,0)/all.length).toFixed(1):"--"; return `<tr class="border-b border-slate-100"><td class="p-3">${x.date || "--"}</td><td class="p-3 font-bold">${escapeHtmlAttr(x.title)} <span class="text-slate-400 text-xs">(Bài ${i+1})</span></td><td class="p-3 text-center font-black text-blueAccent">${x.score}</td><td class="p-3 text-center font-bold">${ca}</td><td class="p-3">--</td></tr>`; }).join("") : '<tr><td colspan="5" class="p-8 text-center text-slate-400">Chưa có dữ liệu điểm.</td></tr>';
+          const table = rows.length ? rows.map((x,i) => { const all=(state.scores||[]).filter(y=>y.subject===subject&&y.title===x.title); const ca=Number.isFinite(Number(x.classAverage)) ? Number(x.classAverage).toFixed(1) : (window.googleSheetMode ? "--" : (all.length ? (all.reduce((a,y)=>a+y.score,0)/all.length).toFixed(1) : "--")); return `<tr class="border-b border-slate-100"><td class="p-3">${x.date || "--"}</td><td class="p-3 font-bold">${escapeHtmlAttr(x.title)} <span class="text-slate-400 text-xs">(Bài ${i+1})</span></td><td class="p-3 text-center font-black text-blueAccent">${x.score}</td><td class="p-3 text-center font-bold">${ca}</td><td class="p-3">--</td></tr>`; }).join("") : '<tr><td colspan="5" class="p-8 text-center text-slate-400">Chưa có dữ liệu điểm.</td></tr>';
           const latestTeacherComment = (state.teacherComments || [])
             .filter(item => String(item.studentCode || "").trim() === studentCode)
             .sort((a, b) => Number(b.weekNumber || 0) - Number(a.weekNumber || 0))[0];
@@ -5960,20 +6001,7 @@ window.renderLoginScreen = function() {
 
         // --- XỬ LÝ TRA CỨU CỦA PHỤ HUYNH ---
         window.performDirectLookup = function() {
-            const phone = document.getElementById('direct-lookup-code').value.replace(/\D/g, "").trim();
-            if (!phone) return showToast("Vui lòng nhập số điện thoại PHHS!", "error");
-            
-            const student = state.students.find(s => String(s.parentPhone || "").replace(/\D/g, "") === phone);
-            if (student) {
-                showToast("Đang tải dữ liệu...", "success");
-                setTimeout(() => {
-                    if(typeof showParentView === 'function') {
-                        showParentView(student.id);
-                    }
-                }, 400); 
-            } else {
-                showToast("Số điện thoại chưa đúng hoặc chưa có trong danh sách!", "error");
-            }
+            lookupParentFromGoogle(document.getElementById('direct-lookup-code').value);
         };
 window.startApp = function() {
             try {
