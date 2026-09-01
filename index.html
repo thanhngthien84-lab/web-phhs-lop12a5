@@ -1581,7 +1581,7 @@ window.closeModal = function(id) {
                                 <input type="date" value="${currentAttendanceDate}" onchange="changeAttendanceDate(this.value)" class="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-blueAccent w-full md:w-48 shadow-sm">
                             </div>
                             <button id="attendance-sync-button" onclick="syncAttendanceFromGoogle()" class="px-5 py-2.5 bg-emerald-50 text-emerald-700 font-bold rounded-xl border border-emerald-200 hover:bg-emerald-100 flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ Sheet</button>
-                            <button onclick="uploadAllAttendanceToGoogle()" class="px-5 py-2.5 bg-blue-50 text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 text-sm transition-all"><i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet</button>
+                            <button id="attendance-upload-button" onclick="uploadAllAttendanceToGoogle()" class="px-5 py-2.5 bg-blue-50 text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet</button>
                             <button onclick="markAllPresent()" class="px-5 py-2.5 bg-emerald-500 text-white font-bold rounded-xl shadow-md hover:bg-emerald-600 flex items-center justify-center gap-2 text-sm transition-all"><i class="ph-bold ph-check-square-offset text-lg"></i> Cả lớp có mặt</button>
                         </div>
                     </div>
@@ -3710,18 +3710,16 @@ window.openEditGroupModal = function(id) {
             document.head.appendChild(script);
         };
 
-        function sendAttendanceToGoogle(records) {
-            const adminKey = getGoogleAdminKey();
-            if (!adminKey) return Promise.reject(new Error("Chưa nhập mã quản trị."));
-
+        function requestAttendanceSave(records, adminKey) {
             return new Promise((resolve, reject) => {
                 const callbackName = "googleAttendanceCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
                 const script = document.createElement("script");
                 let finished = false;
                 const timeout = setTimeout(() => finish({
                     ok: false,
-                    message: "Không thể kết nối để lưu điểm danh."
-                }), 15000);
+                    retryable: true,
+                    message: "Máy chủ phản hồi chậm. Đang thử kết nối lại..."
+                }), 40000);
 
                 function cleanup() {
                     clearTimeout(timeout);
@@ -3733,20 +3731,33 @@ window.openEditGroupModal = function(id) {
                     if (finished) return;
                     finished = true;
                     cleanup();
+
                     if (!response || !response.ok) {
-                        if (response && response.message === "Mã quản trị không chính xác.") {
+                        const message = (response && response.message) ||
+                            "Không thể kết nối để lưu điểm danh.";
+                        const wrongAdminKey = message === "Mã quản trị không chính xác.";
+
+                        if (wrongAdminKey) {
                             window.googleAdminKey = "";
                         }
-                        reject(new Error((response && response.message) || "Không thể lưu điểm danh."));
+
+                        const error = new Error(message);
+                        error.retryable = !wrongAdminKey && (
+                            Boolean(response && response.retryable) ||
+                            /kết nối|phản hồi chậm|lock|service|temporar|busy|thử lại/i.test(message)
+                        );
+                        reject(error);
                         return;
                     }
+
                     resolve(response);
                 }
 
                 window[callbackName] = finish;
                 script.onerror = () => finish({
                     ok: false,
-                    message: "Không thể kết nối để lưu điểm danh."
+                    retryable: true,
+                    message: "Kết nối Google Sheets bị gián đoạn."
                 });
                 script.src = GOOGLE_SHEET_API_URL +
                     "?mode=attendance-save&adminKey=" + encodeURIComponent(adminKey) +
@@ -3756,35 +3767,86 @@ window.openEditGroupModal = function(id) {
             });
         }
 
+        async function sendAttendanceToGoogle(records) {
+            const adminKey = getGoogleAdminKey();
+            if (!adminKey) throw new Error("Chưa nhập mã quản trị.");
+
+            let lastError;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    return await requestAttendanceSave(records, adminKey);
+                } catch (error) {
+                    lastError = error;
+                    if (!error.retryable || attempt === 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 1200));
+                }
+            }
+
+            throw lastError || new Error("Không thể lưu điểm danh.");
+        }
+
         async function sendAttendanceInChunks(records) {
-            for (let index = 0; index < records.length; index += 10) {
-                await sendAttendanceToGoogle(records.slice(index, index + 10));
+            const chunkSize = 30;
+            for (let index = 0; index < records.length; index += chunkSize) {
+                await sendAttendanceToGoogle(records.slice(index, index + chunkSize));
             }
         }
 
         window.uploadAllAttendanceToGoogle = async function() {
+            if (window.attendanceSaveInProgress) {
+                return showToast("Dữ liệu điểm danh đang được lưu, vui lòng chờ.", "error");
+            }
+
+            const selectedDate = String(currentAttendanceDate || "").trim();
+            const dayRecord = (state.attendanceRecords || {})[selectedDate] || {};
             const records = [];
-            Object.entries(state.attendanceRecords || {}).forEach(([date, dayRecord]) => {
-                Object.entries(dayRecord || {}).forEach(([studentId, status]) => {
-                    const student = state.students.find(item => String(item.id) === String(studentId));
-                    if (!student || !student.studentCode || !status) return;
-                    records.push({
-                        date: date,
-                        studentCode: String(student.studentCode),
-                        status: status
-                    });
+
+            Object.entries(dayRecord).forEach(([studentId, status]) => {
+                const student = state.students.find(item =>
+                    String(item.id) === String(studentId)
+                );
+                if (!student || !student.studentCode || !status) return;
+
+                records.push({
+                    date: selectedDate,
+                    studentCode: String(student.studentCode),
+                    status: status
                 });
             });
 
             if (!records.length) {
-                return showToast("Chưa có dữ liệu điểm danh để lưu.", "error");
+                return showToast(
+                    "Ngày đang chọn chưa có dữ liệu điểm danh để lưu.",
+                    "error"
+                );
+            }
+
+            const button = document.getElementById("attendance-upload-button");
+            window.attendanceSaveInProgress = true;
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<i class="ph-bold ph-spinner-gap text-lg animate-spin"></i> Đang lưu...';
             }
 
             try {
                 await sendAttendanceInChunks(records);
-                showToast("Đã lưu toàn bộ dữ liệu chuyên cần lên Google Sheets!", "success");
+                showToast(
+                    "Đã lưu " + records.length + " lượt điểm danh ngày " +
+                    formatDateForDisplay(selectedDate) + " lên Google Sheets!",
+                    "success"
+                );
             } catch (error) {
-                showToast(error.message || "Không thể đồng bộ dữ liệu chuyên cần.", "error");
+                showToast(
+                    (error && error.message) ||
+                    "Không thể lưu điểm danh. Vui lòng thử lại.",
+                    "error"
+                );
+            } finally {
+                window.attendanceSaveInProgress = false;
+                if (button && button.isConnected) {
+                    button.disabled = false;
+                    button.innerHTML = '<i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet';
+                }
             }
         };
 
