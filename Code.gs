@@ -13,6 +13,37 @@ function doGet(e) {
   const mode = String(parameters.mode || "student").trim().toLowerCase();
 
   try {
+    if (mode === "public-settings") {
+      const settings = readPublicSettings(
+        SpreadsheetApp.getActiveSpreadsheet()
+      );
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          settings: settings
+        },
+        callback
+      );
+    }
+
+    if (mode === "settings-save") {
+      assertAdminKey(parameters.adminKey);
+
+      const settings = savePublicSettings(
+        SpreadsheetApp.getActiveSpreadsheet(),
+        parameters.className
+      );
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          settings: settings
+        },
+        callback
+      );
+    }
+
     if (mode === "class") {
       assertAdminKey(parameters.adminKey);
 
@@ -102,6 +133,85 @@ function doGet(e) {
       },
       callback
     );
+  }
+}
+
+function normalizeClassName(value) {
+  return String(value || "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, 80);
+}
+
+function getPublicSettingsSheet(ss, createIfMissing) {
+  let sheet = ss.getSheetByName("CAI_DAT_WEB");
+  if (!sheet && createIfMissing) {
+    sheet = ss.insertSheet("CAI_DAT_WEB");
+    sheet.getRange(1, 1, 1, 3).setValues([
+      ["Khoa", "GiaTri", "CapNhatLuc"]
+    ]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function readPublicSettings(ss) {
+  const sheet = getPublicSettingsSheet(ss, false);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { className: "" };
+  }
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const settings = { className: "" };
+
+  values.slice(1).forEach(row => {
+    const key = String(row[0] || "").trim().toLowerCase();
+    if (key === "classname" || key === "tenlop") {
+      settings.className = normalizeClassName(row[1]);
+    }
+  });
+
+  return settings;
+}
+
+function savePublicSettings(ss, classNameValue) {
+  const className = normalizeClassName(classNameValue);
+  if (!className) {
+    throw new Error("Tên lớp không được để trống.");
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getPublicSettingsSheet(ss, true);
+    const values = sheet.getDataRange().getDisplayValues();
+    let targetRow = 0;
+
+    for (let row = 1; row < values.length; row++) {
+      const key = String(values[row][0] || "").trim().toLowerCase();
+      if (key === "classname" || key === "tenlop") {
+        targetRow = row + 1;
+        break;
+      }
+    }
+
+    const timestamp = Utilities.formatDate(
+      new Date(),
+      Session.getScriptTimeZone() || "Asia/Ho_Chi_Minh",
+      "yyyy-MM-dd HH:mm:ss"
+    );
+    const rowValues = [["className", className, timestamp]];
+
+    if (targetRow) {
+      sheet.getRange(targetRow, 1, 1, 3).setValues(rowValues);
+    } else {
+      sheet.getRange(sheet.getLastRow() + 1, 1, 1, 3)
+        .setValues(rowValues);
+    }
+
+    return { className: className };
+  } finally {
+    lock.releaseLock();
   }
 }
 
