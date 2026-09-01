@@ -17,12 +17,32 @@ function doGet(e) {
       assertAdminKey(parameters.adminKey);
 
       const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const students = getClassList();
+      const studentCodes = students.map(student => student.studentCode);
       return output(
         {
           ok: true,
           updatedAt: new Date().toISOString(),
-          students: getClassList(),
-          attendance: readAttendance(ss)
+          students: students,
+          attendance: readAttendance(ss, "", studentCodes)
+        },
+        callback
+      );
+    }
+
+    if (mode === "attendance") {
+      assertAdminKey(parameters.adminKey);
+
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const studentCodes = getClassList()
+        .map(student => student.studentCode)
+        .filter(Boolean);
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          studentCodes: studentCodes,
+          attendance: readAttendance(ss, "", studentCodes)
         },
         callback
       );
@@ -299,10 +319,14 @@ function studentCodeKey(value) {
   return withoutLeadingZeros || "0";
 }
 
-function getCanonicalStudentCodeMap() {
+function getCanonicalStudentCodeMap(studentCodes) {
   const map = new Map();
-  getClassList().forEach(student => {
-    const code = normalizeStudentCode(student.studentCode);
+  const codes = Array.isArray(studentCodes)
+    ? studentCodes
+    : getClassList().map(student => student.studentCode);
+
+  codes.forEach(studentCode => {
+    const code = normalizeStudentCode(studentCode);
     const key = studentCodeKey(code);
     if (key && code) map.set(key, code);
   });
@@ -314,13 +338,13 @@ function canonicalStudentCode(value, canonicalCodes) {
   return canonicalCodes.get(studentCodeKey(code)) || code;
 }
 
-function readAttendance(ss, studentCode) {
+function readAttendance(ss, studentCode, studentCodes) {
   const sheet = getAttendanceSheet(ss, false);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
   const values = sheet.getDataRange().getDisplayValues();
   const allowedStatuses = ["present", "late", "excused", "unexcused"];
-  const canonicalCodes = getCanonicalStudentCodeMap();
+  const canonicalCodes = getCanonicalStudentCodeMap(studentCodes);
   const requestedKey = studentCodeKey(studentCode);
   const latestByStudentAndDate = new Map();
 
