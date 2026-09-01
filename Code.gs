@@ -280,8 +280,38 @@ function getAttendanceSheet(ss, createIfMissing) {
       ["Ngay", "MaHS", "TrangThai", "CapNhatLuc"]
     ]);
     sheet.setFrozenRows(1);
+    sheet.getRange("B:B").setNumberFormat("@");
   }
   return sheet;
+}
+
+function normalizeStudentCode(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^'+/, "")
+    .replace(/\s+/g, "");
+}
+
+function studentCodeKey(value) {
+  const code = normalizeStudentCode(value);
+  if (!code) return "";
+  const withoutLeadingZeros = code.replace(/^0+/, "");
+  return withoutLeadingZeros || "0";
+}
+
+function getCanonicalStudentCodeMap() {
+  const map = new Map();
+  getClassList().forEach(student => {
+    const code = normalizeStudentCode(student.studentCode);
+    const key = studentCodeKey(code);
+    if (key && code) map.set(key, code);
+  });
+  return map;
+}
+
+function canonicalStudentCode(value, canonicalCodes) {
+  const code = normalizeStudentCode(value);
+  return canonicalCodes.get(studentCodeKey(code)) || code;
 }
 
 function readAttendance(ss, studentCode) {
@@ -290,19 +320,63 @@ function readAttendance(ss, studentCode) {
 
   const values = sheet.getDataRange().getDisplayValues();
   const allowedStatuses = ["present", "late", "excused", "unexcused"];
-  const requestedCode = String(studentCode || "").trim();
+  const canonicalCodes = getCanonicalStudentCodeMap();
+  const requestedKey = studentCodeKey(studentCode);
+  const latestByStudentAndDate = new Map();
 
-  return values.slice(1).map(row => ({
-    date: String(row[0] || "").trim(),
-    studentCode: String(row[1] || "").trim(),
-    status: String(row[2] || "").trim(),
-    updatedAt: String(row[3] || "").trim()
-  })).filter(record =>
-    /^\d{4}-\d{2}-\d{2}$/.test(record.date) &&
-    record.studentCode &&
-    allowedStatuses.includes(record.status) &&
-    (!requestedCode || record.studentCode === requestedCode)
-  );
+  values.slice(1).forEach(row => {
+    const record = {
+      date: String(row[0] || "").trim(),
+      studentCode: canonicalStudentCode(row[1], canonicalCodes),
+      status: String(row[2] || "").trim(),
+      updatedAt: String(row[3] || "").trim()
+    };
+
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(record.date) ||
+      !record.studentCode ||
+      !allowedStatuses.includes(record.status) ||
+      (requestedKey && studentCodeKey(record.studentCode) !== requestedKey)
+    ) {
+      return;
+    }
+
+    latestByStudentAndDate.set(
+      record.date + "|" + studentCodeKey(record.studentCode),
+      record
+    );
+  });
+
+  return Array.from(latestByStudentAndDate.values())
+    .sort((a, b) =>
+      a.date.localeCompare(b.date) ||
+      a.studentCode.localeCompare(b.studentCode)
+    );
+}
+
+function compactAttendanceSheet(ss) {
+  const sheet = getAttendanceSheet(ss, false);
+  if (!sheet) return;
+
+  const records = readAttendance(ss);
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, 4).clearContent();
+  }
+
+  sheet.getRange("B:B").setNumberFormat("@");
+
+  if (records.length) {
+    sheet.getRange(2, 1, records.length, 4).setValues(
+      records.map(record => [
+        record.date,
+        record.studentCode,
+        record.status,
+        record.updatedAt
+      ])
+    );
+  }
 }
 
 function saveAttendanceRecords(ss, records) {
@@ -311,9 +385,13 @@ function saveAttendanceRecords(ss, records) {
   }
 
   const allowedStatuses = ["", "present", "late", "excused", "unexcused"];
+  const canonicalCodes = getCanonicalStudentCodeMap();
   const normalizedRecords = records.map(record => ({
     date: String((record && record.date) || "").trim(),
-    studentCode: String((record && record.studentCode) || "").trim(),
+    studentCode: canonicalStudentCode(
+      record && record.studentCode,
+      canonicalCodes
+    ),
     status: String((record && record.status) || "").trim()
   }));
 
@@ -333,13 +411,16 @@ function saveAttendanceRecords(ss, records) {
   lock.waitLock(20000);
   try {
     const sheet = getAttendanceSheet(ss, true);
+    sheet.getRange("B:B").setNumberFormat("@");
+
     const values = sheet.getDataRange().getDisplayValues();
     const rowByKey = new Map();
 
     for (let row = 1; row < values.length; row++) {
-      const key = String(values[row][0] || "").trim() + "|" +
-        String(values[row][1] || "").trim();
-      if (key !== "|") rowByKey.set(key, row + 1);
+      const date = String(values[row][0] || "").trim();
+      const code = canonicalStudentCode(values[row][1], canonicalCodes);
+      const key = date + "|" + studentCodeKey(code);
+      if (date && code) rowByKey.set(key, row + 1);
     }
 
     const timestamp = Utilities.formatDate(
@@ -350,7 +431,7 @@ function saveAttendanceRecords(ss, records) {
     const rowsToAppend = [];
 
     normalizedRecords.forEach(record => {
-      const key = record.date + "|" + record.studentCode;
+      const key = record.date + "|" + studentCodeKey(record.studentCode);
       const rowValues = [
         record.date,
         record.studentCode,
@@ -363,6 +444,7 @@ function saveAttendanceRecords(ss, records) {
         sheet.getRange(existingRow, 1, 1, 4).setValues([rowValues]);
       } else {
         rowsToAppend.push(rowValues);
+        rowByKey.set(key, sheet.getLastRow() + rowsToAppend.length);
       }
     });
 
@@ -375,6 +457,7 @@ function saveAttendanceRecords(ss, records) {
       ).setValues(rowsToAppend);
     }
 
+    compactAttendanceSheet(ss);
     return normalizedRecords.length;
   } finally {
     lock.releaseLock();
