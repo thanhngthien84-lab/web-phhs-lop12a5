@@ -3546,11 +3546,23 @@ window.openEditGroupModal = function(id) {
             saveData(); renderLayout(); closeModal('wipe-data-modal'); showToast("Đã xóa sạch toàn bộ dữ liệu lớp!", "success");
         }
 
+        function isParentPortalMode() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get("phhs") === "1" || params.get("view") === "phhs";
+        }
+
         function openParentLookupModal() {
+            const portalMode = isParentPortalMode();
+            const overlayBackground = portalMode
+                ? "bg-gradient-to-br from-slate-950 via-primary to-indigo-950"
+                : "bg-slate-900/80 backdrop-blur-sm";
+            const closeButton = portalMode
+                ? ""
+                : '<button onclick="closeModal(\'parent-lookup-modal\')" class="absolute top-6 right-6 text-slate-400 hover:bg-slate-100 rounded-full p-2 transition-colors"><i class="ph-bold ph-x text-xl"></i></button>';
             document.getElementById('modal-container').innerHTML = `
-                <div class="fixed inset-0 bg-slate-900/80 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in" id="parent-lookup-modal">
+                <div class="fixed inset-0 ${overlayBackground} z-[100] flex items-center justify-center p-4 animate-fade-in" id="parent-lookup-modal">
                     <div class="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden flex flex-col relative text-center pt-12 pb-10 px-8">
-                        <button onclick="closeModal('parent-lookup-modal')" class="absolute top-6 right-6 text-slate-400 hover:bg-slate-100 rounded-full p-2 transition-colors"><i class="ph-bold ph-x text-xl"></i></button>
+                        ${closeButton}
                         <div class="w-24 h-24 bg-gradient-to-br from-orange-100 to-amber-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner"><i class="ph-fill ph-student text-5xl text-orange-500"></i></div>
                         <h3 class="font-black text-slate-800 text-3xl mb-2 tracking-tight">Cổng Phụ Huynh</h3>
                         <p class="text-sm text-slate-500 mb-10 font-medium">Nhập số điện thoại của phụ huynh để xem hồ sơ học tập</p>
@@ -3850,54 +3862,138 @@ window.openEditGroupModal = function(id) {
             }
         };
 
-        function lookupParentFromGoogle(phone) {
-            phone = String(phone || "").replace(/\D/g, "");
-            if (!phone) return showToast("Vui lòng nhập số điện thoại PHHS", "error");
+        function requestParentDataFromGoogle(phone) {
+            return new Promise((resolve, reject) => {
+                const callbackName = "googleParentCallback_" + Date.now() + "_" +
+                    Math.floor(Math.random() * 10000);
+                const script = document.createElement("script");
+                let finished = false;
+                const timeout = setTimeout(() => finish({
+                    ok: false,
+                    retryable: true,
+                    message: "Hệ thống phản hồi chậm."
+                }), 30000);
 
-            showToast("Đang tải dữ liệu học tập...", "success");
-            const callbackName = "googleSheetCallback_" + Date.now();
-            const script = document.createElement("script");
-            const timeout = setTimeout(() => finish({ ok: false, message: "Không thể kết nối nguồn dữ liệu. Vui lòng thử lại." }), 15000);
-
-            function cleanup() {
-                clearTimeout(timeout);
-                delete window[callbackName];
-                script.remove();
-            }
-
-            function finish(response) {
-                cleanup();
-                if (!response || !response.ok || !response.student) {
-                    return showToast((response && response.message) || "Không tìm thấy dữ liệu học sinh.", "error");
+                function cleanup() {
+                    clearTimeout(timeout);
+                    delete window[callbackName];
+                    script.remove();
                 }
 
-                const sourceStudent = response.student;
-                const remoteStudent = {
-                    id: "google-" + sourceStudent.studentCode,
-                    studentCode: sourceStudent.studentCode,
-                    name: sourceStudent.name,
-                    parentPhone: sourceStudent.parentPhone,
-                    khoiThi: sourceStudent.khoiThi,
-                    tongDiemMucTieu: sourceStudent.tongDiemMucTieu,
-                    points: 0, stars: 0, group: "", role: "", talent: "", avatarUrl: "", gender: "", history: []
-                };
-                const index = state.students.findIndex(item => String(item.studentCode || "") === String(remoteStudent.studentCode));
-                if (index >= 0) state.students[index] = { ...state.students[index], ...remoteStudent };
-                else state.students.push(remoteStudent);
+                function finish(response) {
+                    if (finished) return;
+                    finished = true;
+                    cleanup();
 
-                state.scores = (response.scores || []).map(item => ({ ...item, studentCode: remoteStudent.studentCode }));
-                state.teacherComments = (response.comments || []).map(item => ({ ...item, studentCode: remoteStudent.studentCode }));
-                applyGoogleAttendance(response.attendance || [], false, [remoteStudent.studentCode]);
-                saveData();
-                window.googleSheetMode = true;
-                window.parentSubject = "Toán";
-                showParentView(remoteStudent.id);
+                    if (!response || !response.ok || !response.student) {
+                        const message = (response && response.message) ||
+                            "Không thể kết nối nguồn dữ liệu.";
+                        const error = new Error(message);
+                        error.retryable = Boolean(response && response.retryable) ||
+                            !/không tìm thấy|thiếu số điện thoại/i.test(message);
+                        reject(error);
+                        return;
+                    }
+
+                    resolve(response);
+                }
+
+                window[callbackName] = finish;
+                script.onerror = () => finish({
+                    ok: false,
+                    retryable: true,
+                    message: "Kết nối tới cổng tra cứu bị gián đoạn."
+                });
+                script.src = GOOGLE_SHEET_API_URL +
+                    "?phone=" + encodeURIComponent(phone) +
+                    "&callback=" + callbackName;
+                document.head.appendChild(script);
+            });
+        }
+
+        async function lookupParentFromGoogle(phone) {
+            phone = String(phone || "").replace(/\D/g, "");
+            if (!phone) {
+                return showToast("Vui lòng nhập số điện thoại PHHS", "error");
             }
 
-            window[callbackName] = finish;
-            script.onerror = () => finish({ ok: false, message: "Không thể kết nối nguồn dữ liệu. Vui lòng thử lại." });
-            script.src = GOOGLE_SHEET_API_URL + "?phone=" + encodeURIComponent(phone) + "&callback=" + callbackName;
-            document.head.appendChild(script);
+            showToast("Đang tải dữ liệu học tập...", "success");
+
+            let response;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    response = await requestParentDataFromGoogle(phone);
+                    break;
+                } catch (error) {
+                    if (!error.retryable || attempt === 1) {
+                        return showToast(
+                            error.message || "Không thể tải dữ liệu học sinh.",
+                            "error"
+                        );
+                    }
+
+                    showToast(
+                        "Hệ thống đang có nhiều lượt tra cứu, đang thử lại...",
+                        "success"
+                    );
+                    await new Promise(resolve => setTimeout(
+                        resolve,
+                        1200 + Math.floor(Math.random() * 1800)
+                    ));
+                }
+            }
+
+            if (!response || !response.student) {
+                return showToast("Không thể tải dữ liệu học sinh.", "error");
+            }
+
+            const sourceStudent = response.student;
+            const remoteStudent = {
+                id: "google-" + sourceStudent.studentCode,
+                studentCode: sourceStudent.studentCode,
+                name: sourceStudent.name,
+                parentPhone: sourceStudent.parentPhone,
+                khoiThi: sourceStudent.khoiThi,
+                tongDiemMucTieu: sourceStudent.tongDiemMucTieu,
+                points: 0,
+                stars: 0,
+                group: "",
+                role: "",
+                talent: "",
+                avatarUrl: "",
+                gender: "",
+                history: []
+            };
+            const index = state.students.findIndex(item =>
+                String(item.studentCode || "") ===
+                String(remoteStudent.studentCode)
+            );
+            if (index >= 0) {
+                state.students[index] = {
+                    ...state.students[index],
+                    ...remoteStudent
+                };
+            } else {
+                state.students.push(remoteStudent);
+            }
+
+            state.scores = (response.scores || []).map(item => ({
+                ...item,
+                studentCode: remoteStudent.studentCode
+            }));
+            state.teacherComments = (response.comments || []).map(item => ({
+                ...item,
+                studentCode: remoteStudent.studentCode
+            }));
+            applyGoogleAttendance(
+                response.attendance || [],
+                false,
+                [remoteStudent.studentCode]
+            );
+            saveData();
+            window.googleSheetMode = true;
+            window.parentSubject = "Toán";
+            showParentView(remoteStudent.id);
         }
 
         window.syncClassFromGoogle = function() {
@@ -3948,6 +4044,11 @@ window.performDirectLookup = function() {
         };
         function showParentView(studentId) {
             const student = state.students.find(s => s.id === studentId); if (!student) return;
+            const portalMode = isParentPortalMode();
+            const closeAction = portalMode
+                ? "openParentLookupModal()"
+                : "closeModal('parent-view-modal')";
+            const closeLabel = portalMode ? "Tra cứu học sinh khác" : "Đóng";
             const maxPoints = 500; const milestones = [100, 300, 500];
             const currentPoints = student.points || 0;
             let nextMilestone = milestones.find(m => m > currentPoints) || maxPoints;
@@ -3970,7 +4071,7 @@ window.performDirectLookup = function() {
                             <div class="w-12 h-12 bg-white/10 rounded-[1rem] flex items-center justify-center"><i class="ph-fill ph-student text-2xl text-orange-400"></i></div>
                             <div><div class="font-black text-lg tracking-tight">HỒ SƠ HỌC TẬP</div><div class="text-[10px] text-slate-300 font-bold uppercase tracking-widest">${state.admin.className}</div></div>
                         </div>
-                        <button onclick="closeModal('parent-view-modal')" class="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors"><i class="ph-bold ph-sign-out text-lg"></i> Đóng</button>
+                        <button onclick="${closeAction}" class="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors"><i class="ph-bold ph-sign-out text-lg"></i> ${closeLabel}</button>
                     </div>
                     
                     <div class="flex-1 p-4 md:p-8 max-w-4xl mx-auto w-full space-y-8 pb-12 mt-4">
@@ -6401,6 +6502,11 @@ window.startApp = function() {
             }
             isDataLoaded = true; 
             renderLayout();
+
+            if (isParentPortalMode()) {
+                document.title = "Cổng Phụ Huynh - Lớp 12A1";
+                window.setTimeout(openParentLookupModal, 0);
+            }
         };
 
         function saveData() {
