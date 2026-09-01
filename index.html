@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>THANH XUÂN 12A1</title>
+    <title>THANH XUÂN</title>
     
     <!-- External Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -2734,6 +2734,7 @@ window.closeModal = function(id) {
             state.admin.className = className;
             state.admin.name = teacherName;
             saveData();
+            updateDocumentTitle();
             renderLayout();
             showToast("Đang đồng bộ tên lớp lên Google Sheets...", "success");
 
@@ -3611,7 +3612,7 @@ window.openEditGroupModal = function(id) {
 
         window.googleAdminKey = window.googleAdminKey || "";
 
-        function updateParentPortalTitle() {
+        function updateDocumentTitle() {
             const rawClassName = String(
                 (state.admin && state.admin.className) || ""
             ).trim();
@@ -3619,9 +3620,16 @@ window.openEditGroupModal = function(id) {
                 .replace(/^LỚP\s*/i, "")
                 .trim();
 
+            if (isParentPortalMode()) {
+                document.title = classCode
+                    ? "Cổng Phụ Huynh - Lớp " + classCode
+                    : "Cổng Phụ Huynh";
+                return;
+            }
+
             document.title = classCode
-                ? "Cổng Phụ Huynh - Lớp " + classCode
-                : "Cổng Phụ Huynh";
+                ? "THANH XUÂN " + classCode.toUpperCase()
+                : "THANH XUÂN";
         }
 
         function applyPublicSettings(settings) {
@@ -3633,9 +3641,7 @@ window.openEditGroupModal = function(id) {
             state.admin.className = className;
             saveData();
 
-            if (isParentPortalMode()) {
-                updateParentPortalTitle();
-            }
+            updateDocumentTitle();
         }
 
         function loadPublicSettingsFromGoogle() {
@@ -6659,9 +6665,9 @@ window.startApp = function() {
             }
             isDataLoaded = true; 
             renderLayout();
+            updateDocumentTitle();
 
             if (isParentPortalMode()) {
-                document.title = "Cổng Phụ Huynh";
                 window.setTimeout(openParentLookupModal, 0);
                 loadPublicSettingsFromGoogle()
                     .then(response => applyPublicSettings(response.settings))
