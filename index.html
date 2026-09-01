@@ -1580,6 +1580,7 @@ window.closeModal = function(id) {
                             <div class="relative">
                                 <input type="date" value="${currentAttendanceDate}" onchange="changeAttendanceDate(this.value)" class="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-blueAccent w-full md:w-48 shadow-sm">
                             </div>
+                            <button id="attendance-sync-button" onclick="syncAttendanceFromGoogle()" class="px-5 py-2.5 bg-emerald-50 text-emerald-700 font-bold rounded-xl border border-emerald-200 hover:bg-emerald-100 flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ Sheet</button>
                             <button onclick="uploadAllAttendanceToGoogle()" class="px-5 py-2.5 bg-blue-50 text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 text-sm transition-all"><i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet</button>
                             <button onclick="markAllPresent()" class="px-5 py-2.5 bg-emerald-500 text-white font-bold rounded-xl shadow-md hover:bg-emerald-600 flex items-center justify-center gap-2 text-sm transition-all"><i class="ph-bold ph-check-square-offset text-lg"></i> Cả lớp có mặt</button>
                         </div>
@@ -3594,7 +3595,12 @@ window.openEditGroupModal = function(id) {
                 const localOnlyRecords = {};
                 Object.entries(state.attendanceRecords).forEach(([date, dayRecord]) => {
                     Object.entries(dayRecord || {}).forEach(([studentId, status]) => {
-                        if (!String(studentId).startsWith("google-")) {
+                        const id = String(studentId);
+                        const belongsToSheet = targetIds.size
+                            ? targetIds.has(id)
+                            : id.startsWith("google-");
+
+                        if (!belongsToSheet) {
                             if (!localOnlyRecords[date]) localOnlyRecords[date] = {};
                             localOnlyRecords[date][studentId] = status;
                         }
@@ -3619,11 +3625,90 @@ window.openEditGroupModal = function(id) {
 
         function getGoogleAdminKey() {
             if (window.googleAdminKey) return window.googleAdminKey;
-            const key = window.prompt("Nhập mã quản trị GVCN để lưu điểm danh lên Sheet:");
+            const key = window.prompt("Nhập mã quản trị GVCN để đồng bộ dữ liệu điểm danh:");
             if (!key) return "";
             window.googleAdminKey = key;
             return key;
         }
+
+        window.syncAttendanceFromGoogle = function() {
+            const adminKey = getGoogleAdminKey();
+            if (!adminKey) return;
+
+            const button = document.getElementById("attendance-sync-button");
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<i class="ph-bold ph-spinner-gap text-lg animate-spin"></i> Đang đồng bộ...';
+            }
+
+            showToast("Đang tải dữ liệu điểm danh từ Google Sheets...", "success");
+
+            const callbackName = "googleAttendanceSyncCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+            const script = document.createElement("script");
+            let finished = false;
+            const timeout = setTimeout(() => finish({
+                ok: false,
+                message: "Không thể kết nối nguồn dữ liệu điểm danh."
+            }), 15000);
+
+            function cleanup() {
+                clearTimeout(timeout);
+                delete window[callbackName];
+                script.remove();
+            }
+
+            function restoreButton() {
+                if (!button || !button.isConnected) return;
+                button.disabled = false;
+                button.innerHTML = '<i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ Sheet';
+            }
+
+            function finish(response) {
+                if (finished) return;
+                finished = true;
+                cleanup();
+
+                if (!response || !response.ok || !Array.isArray(response.attendance)) {
+                    restoreButton();
+                    if (response && response.message === "Mã quản trị không chính xác.") {
+                        window.googleAdminKey = "";
+                    }
+                    showToast(
+                        (response && response.message) || "Không thể đồng bộ dữ liệu điểm danh.",
+                        "error"
+                    );
+                    return;
+                }
+
+                window.googleAdminKey = adminKey;
+                const studentCodes = Array.isArray(response.studentCodes)
+                    ? response.studentCodes
+                    : [];
+
+                applyGoogleAttendance(
+                    response.attendance,
+                    true,
+                    studentCodes
+                );
+                saveData();
+                restoreButton();
+                renderLayout();
+                showToast(
+                    "Đã đồng bộ " + response.attendance.length + " bản ghi điểm danh từ Google Sheets!",
+                    "success"
+                );
+            }
+
+            window[callbackName] = finish;
+            script.onerror = () => finish({
+                ok: false,
+                message: "Không thể kết nối nguồn dữ liệu điểm danh."
+            });
+            script.src = GOOGLE_SHEET_API_URL +
+                "?mode=attendance&adminKey=" + encodeURIComponent(adminKey) +
+                "&callback=" + callbackName;
+            document.head.appendChild(script);
+        };
 
         function sendAttendanceToGoogle(records) {
             const adminKey = getGoogleAdminKey();
@@ -3777,7 +3862,11 @@ window.openEditGroupModal = function(id) {
                 state.scores = [];
                 state.teacherComments = [];
                 window.googleAdminKey = adminKey;
-                applyGoogleAttendance(response.attendance || [], true);
+                applyGoogleAttendance(
+                    response.attendance || [],
+                    true,
+                    response.students.map(student => student.studentCode)
+                );
                 saveData();
                 renderLayout();
                 showToast("Đã đồng bộ " + state.students.length + " học sinh từ Google Sheets!", "success");
