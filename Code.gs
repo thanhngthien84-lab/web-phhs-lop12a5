@@ -14,22 +14,39 @@ function doGet(e) {
 
   try {
     if (mode === "class") {
-      const adminKey = String(parameters.adminKey || "");
-      const savedKey = PropertiesService.getScriptProperties()
-        .getProperty("ADMIN_SYNC_KEY");
+      assertAdminKey(parameters.adminKey);
 
-      if (!savedKey || adminKey !== savedKey) {
-        return output(
-          { ok: false, message: "Mã quản trị không chính xác." },
-          callback
-        );
-      }
-
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
       return output(
         {
           ok: true,
           updatedAt: new Date().toISOString(),
-          students: getClassList()
+          students: getClassList(),
+          attendance: readAttendance(ss)
+        },
+        callback
+      );
+    }
+
+    if (mode === "attendance-save") {
+      assertAdminKey(parameters.adminKey);
+
+      let records;
+      try {
+        records = JSON.parse(String(parameters.records || "[]"));
+      } catch (error) {
+        throw new Error("Dữ liệu điểm danh không hợp lệ.");
+      }
+
+      const savedCount = saveAttendanceRecords(
+        SpreadsheetApp.getActiveSpreadsheet(),
+        records
+      );
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          savedCount: savedCount
         },
         callback
       );
@@ -129,7 +146,8 @@ function getStudentData(phone) {
   return {
     student: student,
     scores: readScores(ss, student.studentCode),
-    comments: readComments(ss, student.studentCode)
+    comments: readComments(ss, student.studentCode),
+    attendance: readAttendance(ss, student.studentCode)
   };
 }
 
@@ -244,6 +262,123 @@ function requireColumn(headers, normalizedName, displayName) {
     throw new Error('Sheet "HOC_SINH" thiếu cột "' + displayName + '".');
   }
   return column;
+}
+
+function assertAdminKey(providedKey) {
+  const savedKey = PropertiesService.getScriptProperties()
+    .getProperty("ADMIN_SYNC_KEY");
+  if (!savedKey || String(providedKey || "") !== savedKey) {
+    throw new Error("Mã quản trị không chính xác.");
+  }
+}
+
+function getAttendanceSheet(ss, createIfMissing) {
+  let sheet = ss.getSheetByName("DIEM_DANH");
+  if (!sheet && createIfMissing) {
+    sheet = ss.insertSheet("DIEM_DANH");
+    sheet.getRange(1, 1, 1, 4).setValues([
+      ["Ngay", "MaHS", "TrangThai", "CapNhatLuc"]
+    ]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function readAttendance(ss, studentCode) {
+  const sheet = getAttendanceSheet(ss, false);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const allowedStatuses = ["present", "late", "excused", "unexcused"];
+  const requestedCode = String(studentCode || "").trim();
+
+  return values.slice(1).map(row => ({
+    date: String(row[0] || "").trim(),
+    studentCode: String(row[1] || "").trim(),
+    status: String(row[2] || "").trim(),
+    updatedAt: String(row[3] || "").trim()
+  })).filter(record =>
+    /^\d{4}-\d{2}-\d{2}$/.test(record.date) &&
+    record.studentCode &&
+    allowedStatuses.includes(record.status) &&
+    (!requestedCode || record.studentCode === requestedCode)
+  );
+}
+
+function saveAttendanceRecords(ss, records) {
+  if (!Array.isArray(records) || records.length === 0) {
+    throw new Error("Không có dữ liệu điểm danh để lưu.");
+  }
+
+  const allowedStatuses = ["", "present", "late", "excused", "unexcused"];
+  const normalizedRecords = records.map(record => ({
+    date: String((record && record.date) || "").trim(),
+    studentCode: String((record && record.studentCode) || "").trim(),
+    status: String((record && record.status) || "").trim()
+  }));
+
+  normalizedRecords.forEach(record => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(record.date)) {
+      throw new Error("Ngày điểm danh không hợp lệ.");
+    }
+    if (!record.studentCode) {
+      throw new Error("Thiếu mã học sinh khi lưu điểm danh.");
+    }
+    if (!allowedStatuses.includes(record.status)) {
+      throw new Error("Trạng thái điểm danh không hợp lệ.");
+    }
+  });
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getAttendanceSheet(ss, true);
+    const values = sheet.getDataRange().getDisplayValues();
+    const rowByKey = new Map();
+
+    for (let row = 1; row < values.length; row++) {
+      const key = String(values[row][0] || "").trim() + "|" +
+        String(values[row][1] || "").trim();
+      if (key !== "|") rowByKey.set(key, row + 1);
+    }
+
+    const timestamp = Utilities.formatDate(
+      new Date(),
+      Session.getScriptTimeZone() || "Asia/Ho_Chi_Minh",
+      "yyyy-MM-dd HH:mm:ss"
+    );
+    const rowsToAppend = [];
+
+    normalizedRecords.forEach(record => {
+      const key = record.date + "|" + record.studentCode;
+      const rowValues = [
+        record.date,
+        record.studentCode,
+        record.status,
+        timestamp
+      ];
+      const existingRow = rowByKey.get(key);
+
+      if (existingRow) {
+        sheet.getRange(existingRow, 1, 1, 4).setValues([rowValues]);
+      } else {
+        rowsToAppend.push(rowValues);
+      }
+    });
+
+    if (rowsToAppend.length) {
+      sheet.getRange(
+        sheet.getLastRow() + 1,
+        1,
+        rowsToAppend.length,
+        4
+      ).setValues(rowsToAppend);
+    }
+
+    return normalizedRecords.length;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function normalizePhone(value) {
