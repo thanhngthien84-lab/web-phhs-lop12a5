@@ -137,7 +137,9 @@ function readScores(ss, studentCode) {
   const sheet = ss.getSheetByName("BANG_DIEM_WEB");
   if (!sheet) return [];
 
-  const values = sheet.getDataRange().getDisplayValues();
+  const range = sheet.getDataRange();
+  const values = range.getDisplayValues();
+  const notes = range.getNotes();
   if (values.length < 6) return [];
 
   const codes = values[2] || [];
@@ -161,6 +163,17 @@ function readScores(ss, studentCode) {
 
     if (!match || !String(titles[column] || "").trim()) continue;
 
+    const classScores = [];
+    for (let row = 5; row < values.length; row++) {
+      const rawClassScore = String(values[row][column] || "").trim();
+      if (!rawClassScore) continue;
+      const classScore = Number(rawClassScore.replace(",", "."));
+      if (Number.isFinite(classScore)) classScores.push(classScore);
+    }
+    const classAverage = classScores.length
+      ? classScores.reduce((sum, score) => sum + score, 0) / classScores.length
+      : null;
+
     for (let row = 5; row < values.length; row++) {
       const code = String(values[row][0] || "").trim();
       const rawScore = String(values[row][column] || "").trim();
@@ -174,7 +187,9 @@ function readScores(ss, studentCode) {
         subject: subjectMap[match[1]],
         title: String(titles[column]).trim(),
         date: String(dates[column] || "").trim(),
-        score: score
+        score: score,
+        classAverage: classAverage,
+        note: String((notes[row] && notes[row][column]) || "").trim()
       });
     }
   }

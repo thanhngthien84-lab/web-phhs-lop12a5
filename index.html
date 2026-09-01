@@ -216,6 +216,14 @@
 
         function escapeInlineJs(str) { return str ? String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, '\\n').replace(/\r/g, '\\r') : ''; }
         function escapeHtmlAttr(str) { return str ? String(str).replace(/"/g, '&quot;') : ''; }
+        function escapeHtmlText(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
         function toInlineJsValue(value) {
             return typeof value === 'number' && Number.isFinite(value)
                 ? String(value)
@@ -3736,7 +3744,7 @@ window.performDirectLookup = function() {
             const dots = points.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="#4f7ff0"/>`).join("");
             return `<style>@media (min-width:768px){#parent-view-modal .grid.grid-cols-2.md\\:grid-cols-4{grid-template-columns:repeat(5,minmax(0,1fr))!important;}}</style><div class="w-full h-72"><svg viewBox="0 0 ${width} ${height}" class="w-full h-full" role="img" aria-label="Biểu đồ điểm ${subject}"><text x="${width / 2}" y="24" text-anchor="middle" fill="#102a56" font-size="20" font-weight="700">Biểu đồ thống kê môn ${subject}</text><text x="${width / 2}" y="41" text-anchor="middle" fill="#94a3b8" font-size="11">Điểm học sinh và xu hướng học tập</text>${grid}<line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${points[0].x}" y1="${trendY(points[0].x)}" x2="${points[points.length - 1].x}" y2="${trendY(points[points.length - 1].x)}" stroke="#75ad77" stroke-width="3" stroke-dasharray="7 6"/><polyline points="${scoreLine}" fill="none" stroke="#4f7ff0" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}${labels}<rect x="${width / 2 - 116}" y="52" width="16" height="10" rx="2" fill="#4f7ff0"/><text x="${width / 2 - 94}" y="61" fill="#475569" font-size="11">Điểm học sinh</text><line x1="${width / 2 + 26}" y1="57" x2="${width / 2 + 48}" y2="57" stroke="#75ad77" stroke-width="3" stroke-dasharray="6 5"/><text x="${width / 2 + 55}" y="61" fill="#475569" font-size="11">Xu hướng</text></svg></div>`;
           })() : '<div class="text-slate-400 italic py-12">Chưa có điểm môn này.</div>';
-          const table = rows.length ? rows.map((x,i) => { const all=(state.scores||[]).filter(y=>y.subject===subject&&y.title===x.title); const ca=Number.isFinite(Number(x.classAverage)) ? Number(x.classAverage).toFixed(1) : (window.googleSheetMode ? "--" : (all.length ? (all.reduce((a,y)=>a+y.score,0)/all.length).toFixed(1) : "--")); return `<tr class="border-b border-slate-100"><td class="p-3">${x.date || "--"}</td><td class="p-3 font-bold">${escapeHtmlAttr(x.title)} <span class="text-slate-400 text-xs">(Bài ${i+1})</span></td><td class="p-3 text-center font-black text-blueAccent">${x.score}</td><td class="p-3 text-center font-bold">${ca}</td><td class="p-3">--</td></tr>`; }).join("") : '<tr><td colspan="5" class="p-8 text-center text-slate-400">Chưa có dữ liệu điểm.</td></tr>';
+          const table = rows.length ? rows.map((x,i) => { const all=(state.scores||[]).filter(y=>y.subject===subject&&y.title===x.title); const ca=Number.isFinite(Number(x.classAverage)) ? Number(x.classAverage).toFixed(2).replace(/\.?0+$/, "") : (window.googleSheetMode ? "--" : (all.length ? (all.reduce((a,y)=>a+y.score,0)/all.length).toFixed(2).replace(/\.?0+$/, "") : "--")); const note = x.note ? escapeHtmlText(x.note) : "--"; return `<tr class="border-b border-slate-100"><td class="p-3">${x.date || "--"}</td><td class="p-3 font-bold">${escapeHtmlAttr(x.title)} <span class="text-slate-400 text-xs">(Bài ${i+1})</span></td><td class="p-3 text-center font-black text-blueAccent">${x.score}</td><td class="p-3 text-center font-bold">${ca}</td><td class="p-3 whitespace-pre-line">${note}</td></tr>`; }).join("") : '<tr><td colspan="5" class="p-8 text-center text-slate-400">Chưa có dữ liệu điểm.</td></tr>';
           const latestTeacherComment = (state.teacherComments || [])
             .filter(item => String(item.studentCode || "").trim() === studentCode)
             .sort((a, b) => Number(b.weekNumber || 0) - Number(a.weekNumber || 0))[0];
