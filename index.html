@@ -2719,7 +2719,39 @@ window.closeModal = function(id) {
             event.target.value = '';
         };
 
-        function saveSettings() { state.admin.className = document.getElementById('setting-classname').value; state.admin.name = document.getElementById('setting-gvcn').value; saveData(); renderLayout(); showToast("Đã lưu thông tin cài đặt", "success"); }
+        async function saveSettings() {
+            const className = String(
+                document.getElementById('setting-classname').value || ""
+            ).trim();
+            const teacherName = String(
+                document.getElementById('setting-gvcn').value || ""
+            ).trim();
+
+            if (!className) {
+                return showToast("Tên lớp không được để trống.", "error");
+            }
+
+            state.admin.className = className;
+            state.admin.name = teacherName;
+            saveData();
+            renderLayout();
+            showToast("Đang đồng bộ tên lớp lên Google Sheets...", "success");
+
+            try {
+                const response = await savePublicSettingsToGoogle(className);
+                applyPublicSettings(response.settings || { className: className });
+                showToast(
+                    "Đã lưu cài đặt và cập nhật tên lớp cho cổng PHHS!",
+                    "success"
+                );
+            } catch (error) {
+                showToast(
+                    "Đã lưu trên máy nhưng chưa đồng bộ được tên lớp: " +
+                    (error.message || "Vui lòng thử lại."),
+                    "error"
+                );
+            }
+        }
 
         window.handleRewardImageUpload = function(event) {
             const file = event.target.files[0];
@@ -3579,6 +3611,131 @@ window.openEditGroupModal = function(id) {
 
         window.googleAdminKey = window.googleAdminKey || "";
 
+        function updateParentPortalTitle() {
+            const rawClassName = String(
+                (state.admin && state.admin.className) || ""
+            ).trim();
+            const classCode = rawClassName
+                .replace(/^LỚP\s*/i, "")
+                .trim();
+
+            document.title = classCode
+                ? "Cổng Phụ Huynh - Lớp " + classCode
+                : "Cổng Phụ Huynh";
+        }
+
+        function applyPublicSettings(settings) {
+            const className = String(
+                (settings && settings.className) || ""
+            ).trim();
+            if (!className) return;
+
+            state.admin.className = className;
+            saveData();
+
+            if (isParentPortalMode()) {
+                updateParentPortalTitle();
+            }
+        }
+
+        function loadPublicSettingsFromGoogle() {
+            return new Promise((resolve, reject) => {
+                const callbackName = "googlePublicSettingsCallback_" +
+                    Date.now() + "_" + Math.floor(Math.random() * 10000);
+                const script = document.createElement("script");
+                let finished = false;
+                const timeout = setTimeout(() => finish({
+                    ok: false,
+                    message: "Không thể tải tên lớp."
+                }), 15000);
+
+                function cleanup() {
+                    clearTimeout(timeout);
+                    delete window[callbackName];
+                    script.remove();
+                }
+
+                function finish(response) {
+                    if (finished) return;
+                    finished = true;
+                    cleanup();
+
+                    if (!response || !response.ok || !response.settings) {
+                        reject(new Error(
+                            (response && response.message) ||
+                            "Không thể tải tên lớp."
+                        ));
+                        return;
+                    }
+
+                    resolve(response);
+                }
+
+                window[callbackName] = finish;
+                script.onerror = () => finish({
+                    ok: false,
+                    message: "Không thể kết nối để tải tên lớp."
+                });
+                script.src = GOOGLE_SHEET_API_URL +
+                    "?mode=public-settings&callback=" + callbackName;
+                document.head.appendChild(script);
+            });
+        }
+
+        function savePublicSettingsToGoogle(className) {
+            const adminKey = getGoogleAdminKey();
+            if (!adminKey) {
+                return Promise.reject(new Error("Chưa nhập mã quản trị."));
+            }
+
+            return new Promise((resolve, reject) => {
+                const callbackName = "googleSettingsSaveCallback_" +
+                    Date.now() + "_" + Math.floor(Math.random() * 10000);
+                const script = document.createElement("script");
+                let finished = false;
+                const timeout = setTimeout(() => finish({
+                    ok: false,
+                    message: "Hệ thống phản hồi chậm khi lưu tên lớp."
+                }), 30000);
+
+                function cleanup() {
+                    clearTimeout(timeout);
+                    delete window[callbackName];
+                    script.remove();
+                }
+
+                function finish(response) {
+                    if (finished) return;
+                    finished = true;
+                    cleanup();
+
+                    if (!response || !response.ok || !response.settings) {
+                        const message = (response && response.message) ||
+                            "Không thể lưu tên lớp.";
+                        if (message === "Mã quản trị không chính xác.") {
+                            window.googleAdminKey = "";
+                        }
+                        reject(new Error(message));
+                        return;
+                    }
+
+                    resolve(response);
+                }
+
+                window[callbackName] = finish;
+                script.onerror = () => finish({
+                    ok: false,
+                    message: "Không thể kết nối để lưu tên lớp."
+                });
+                script.src = GOOGLE_SHEET_API_URL +
+                    "?mode=settings-save&adminKey=" +
+                    encodeURIComponent(adminKey) +
+                    "&className=" + encodeURIComponent(className) +
+                    "&callback=" + callbackName;
+                document.head.appendChild(script);
+            });
+        }
+
         function studentCodeKey(value) {
             const code = String(value || "").trim().replace(/^'+/, "").replace(/\s+/g, "");
             if (!code) return "";
@@ -3637,7 +3794,7 @@ window.openEditGroupModal = function(id) {
 
         function getGoogleAdminKey() {
             if (window.googleAdminKey) return window.googleAdminKey;
-            const key = window.prompt("Nhập mã quản trị GVCN để đồng bộ dữ liệu điểm danh:");
+            const key = window.prompt("Nhập mã quản trị GVCN để đồng bộ dữ liệu với Google Sheets:");
             if (!key) return "";
             window.googleAdminKey = key;
             return key;
@@ -6504,8 +6661,14 @@ window.startApp = function() {
             renderLayout();
 
             if (isParentPortalMode()) {
-                document.title = "Cổng Phụ Huynh - Lớp 12A5";
+                document.title = "Cổng Phụ Huynh";
                 window.setTimeout(openParentLookupModal, 0);
+                loadPublicSettingsFromGoogle()
+                    .then(response => applyPublicSettings(response.settings))
+                    .catch(error => console.warn(
+                        "Không thể tải tên lớp cho cổng PHHS:",
+                        error
+                    ));
             }
         };
 
