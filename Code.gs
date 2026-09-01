@@ -378,37 +378,13 @@ function readAttendance(ss, studentCode, studentCodes) {
     );
 }
 
-function compactAttendanceSheet(ss) {
-  const sheet = getAttendanceSheet(ss, false);
-  if (!sheet) return;
-
-  const records = readAttendance(ss);
-  const lastRow = sheet.getLastRow();
-
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, 4).clearContent();
-  }
-
-  sheet.getRange("B:B").setNumberFormat("@");
-
-  if (records.length) {
-    sheet.getRange(2, 1, records.length, 4).setValues(
-      records.map(record => [
-        record.date,
-        record.studentCode,
-        record.status,
-        record.updatedAt
-      ])
-    );
-  }
-}
-
 function saveAttendanceRecords(ss, records) {
   if (!Array.isArray(records) || records.length === 0) {
     throw new Error("Không có dữ liệu điểm danh để lưu.");
   }
 
   const allowedStatuses = ["", "present", "late", "excused", "unexcused"];
+  const storedStatuses = ["present", "late", "excused", "unexcused"];
   const canonicalCodes = getCanonicalStudentCodeMap();
   const normalizedRecords = records.map(record => ({
     date: String((record && record.date) || "").trim(),
@@ -432,56 +408,82 @@ function saveAttendanceRecords(ss, records) {
   });
 
   const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  lock.waitLock(30000);
   try {
     const sheet = getAttendanceSheet(ss, true);
     sheet.getRange("B:B").setNumberFormat("@");
 
     const values = sheet.getDataRange().getDisplayValues();
-    const rowByKey = new Map();
+    const latestByStudentAndDate = new Map();
 
-    for (let row = 1; row < values.length; row++) {
-      const date = String(values[row][0] || "").trim();
-      const code = canonicalStudentCode(values[row][1], canonicalCodes);
-      const key = date + "|" + studentCodeKey(code);
-      if (date && code) rowByKey.set(key, row + 1);
-    }
+    values.slice(1).forEach(row => {
+      const date = String(row[0] || "").trim();
+      const studentCode = canonicalStudentCode(row[1], canonicalCodes);
+      const status = String(row[2] || "").trim();
+      const updatedAt = String(row[3] || "").trim();
+
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        !studentCode ||
+        !storedStatuses.includes(status)
+      ) {
+        return;
+      }
+
+      latestByStudentAndDate.set(
+        date + "|" + studentCodeKey(studentCode),
+        {
+          date: date,
+          studentCode: studentCode,
+          status: status,
+          updatedAt: updatedAt
+        }
+      );
+    });
 
     const timestamp = Utilities.formatDate(
       new Date(),
       Session.getScriptTimeZone() || "Asia/Ho_Chi_Minh",
       "yyyy-MM-dd HH:mm:ss"
     );
-    const rowsToAppend = [];
 
     normalizedRecords.forEach(record => {
       const key = record.date + "|" + studentCodeKey(record.studentCode);
-      const rowValues = [
+
+      if (!record.status) {
+        latestByStudentAndDate.delete(key);
+        return;
+      }
+
+      latestByStudentAndDate.set(key, {
+        date: record.date,
+        studentCode: record.studentCode,
+        status: record.status,
+        updatedAt: timestamp
+      });
+    });
+
+    const rows = Array.from(latestByStudentAndDate.values())
+      .sort((a, b) =>
+        a.date.localeCompare(b.date) ||
+        a.studentCode.localeCompare(b.studentCode)
+      )
+      .map(record => [
         record.date,
         record.studentCode,
         record.status,
-        timestamp
-      ];
-      const existingRow = rowByKey.get(key);
+        record.updatedAt
+      ]);
 
-      if (existingRow) {
-        sheet.getRange(existingRow, 1, 1, 4).setValues([rowValues]);
-      } else {
-        rowsToAppend.push(rowValues);
-        rowByKey.set(key, sheet.getLastRow() + rowsToAppend.length);
-      }
-    });
-
-    if (rowsToAppend.length) {
-      sheet.getRange(
-        sheet.getLastRow() + 1,
-        1,
-        rowsToAppend.length,
-        4
-      ).setValues(rowsToAppend);
+    const existingBodyRows = Math.max(sheet.getLastRow() - 1, 0);
+    if (existingBodyRows) {
+      sheet.getRange(2, 1, existingBodyRows, 4).clearContent();
     }
 
-    compactAttendanceSheet(ss);
+    if (rows.length) {
+      sheet.getRange(2, 1, rows.length, 4).setValues(rows);
+    }
+
     return normalizedRecords.length;
   } finally {
     lock.releaseLock();
