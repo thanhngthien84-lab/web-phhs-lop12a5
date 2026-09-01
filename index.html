@@ -1576,10 +1576,11 @@ window.closeModal = function(id) {
                             <button onclick="switchAttendanceTab('diem-danh')" class="flex-1 md:flex-none px-6 py-2.5 rounded-lg text-sm font-bold bg-white text-blueAccent shadow-sm">Thực hiện điểm danh</button>
                             <button onclick="switchAttendanceTab('thong-ke')" class="flex-1 md:flex-none px-6 py-2.5 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors">Bảng thống kê</button>
                         </div>
-                        <div class="flex gap-4 items-center w-full md:w-auto">
+                        <div class="flex flex-wrap gap-3 items-center w-full md:w-auto">
                             <div class="relative">
                                 <input type="date" value="${currentAttendanceDate}" onchange="changeAttendanceDate(this.value)" class="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-blueAccent w-full md:w-48 shadow-sm">
                             </div>
+                            <button onclick="uploadAllAttendanceToGoogle()" class="px-5 py-2.5 bg-blue-50 text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 text-sm transition-all"><i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet</button>
                             <button onclick="markAllPresent()" class="px-5 py-2.5 bg-emerald-500 text-white font-bold rounded-xl shadow-md hover:bg-emerald-600 flex items-center justify-center gap-2 text-sm transition-all"><i class="ph-bold ph-check-square-offset text-lg"></i> Cả lớp có mặt</button>
                         </div>
                     </div>
@@ -1667,33 +1668,70 @@ window.closeModal = function(id) {
         }
         
         function markAttendance(id, status) {
-  // Lưu vị trí đang cuộn trong danh sách học sinh
-  const list = document.getElementById("attendance-student-list");
-  const scrollTop = list ? list.scrollTop : 0;
+            const list = document.getElementById("attendance-student-list");
+            const scrollTop = list ? list.scrollTop : 0;
+            const dayRecord = state.attendanceRecords[currentAttendanceDate];
+            const previousStatus = dayRecord[id] || "";
+            const nextStatus = previousStatus === status ? "" : status;
 
-  if (state.attendanceRecords[currentAttendanceDate][id] === status) {
-    delete state.attendanceRecords[currentAttendanceDate][id];
-  } else {
-    state.attendanceRecords[currentAttendanceDate][id] = status;
-  }
+            if (nextStatus) dayRecord[id] = nextStatus;
+            else delete dayRecord[id];
 
-  saveData();
-  renderLayout();
+            saveData();
+            renderLayout();
 
-  // Khôi phục vị trí cuộn sau khi giao diện được vẽ lại
-  requestAnimationFrame(() => {
-    const newList = document.getElementById("attendance-student-list");
+            requestAnimationFrame(() => {
+                const newList = document.getElementById("attendance-student-list");
+                if (newList) newList.scrollTop = scrollTop;
+            });
 
-    if (newList) {
-      newList.scrollTop = scrollTop;
-    }
-  });
-}
+            const student = state.students.find(item => String(item.id) === String(id));
+            if (!student || !student.studentCode) return;
 
-        function markAllPresent() { 
-            state.attendanceRecords[currentAttendanceDate] = {}; 
-            state.students.forEach(s => state.attendanceRecords[currentAttendanceDate][s.id] = 'present'); 
-            saveData(); renderLayout(); showToast("Đã đánh dấu tất cả có mặt!"); 
+            sendAttendanceToGoogle([{
+                date: currentAttendanceDate,
+                studentCode: String(student.studentCode),
+                status: nextStatus
+            }]).catch(error => {
+                if (previousStatus) dayRecord[id] = previousStatus;
+                else delete dayRecord[id];
+                saveData();
+                renderLayout();
+                showToast(error.message || "Không thể lưu điểm danh.", "error");
+            });
+        }
+
+        function markAllPresent() {
+            const previousRecord = { ...(state.attendanceRecords[currentAttendanceDate] || {}) };
+            state.attendanceRecords[currentAttendanceDate] = {};
+            const records = [];
+
+            state.students.forEach(student => {
+                state.attendanceRecords[currentAttendanceDate][student.id] = "present";
+                if (student.studentCode) {
+                    records.push({
+                        date: currentAttendanceDate,
+                        studentCode: String(student.studentCode),
+                        status: "present"
+                    });
+                }
+            });
+
+            saveData();
+            renderLayout();
+
+            if (!records.length) {
+                return showToast("Đã đánh dấu tất cả có mặt!", "success");
+            }
+
+            sendAttendanceInChunks(records)
+                .then(() => showToast("Đã điểm danh và đồng bộ cả lớp!", "success"))
+                .catch(error => {
+                    state.attendanceRecords[currentAttendanceDate] = previousRecord;
+                    saveData();
+                    renderLayout();
+                    showToast(error.message || "Không thể lưu điểm danh.", "error");
+                });
         }
 
         function changeAttendanceDate(d) { if(d) { currentAttendanceDate = d; renderLayout(); } }
@@ -3526,6 +3564,132 @@ window.openEditGroupModal = function(id) {
         // API Google Sheets: chỉ trả về dữ liệu của học sinh khớp số điện thoại.
         const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAOm6rvHIUbC1jq8oCY5yGVLT4y8Wp9J250Yl9lQfK1D1m4zIN7OnHahw3bKzE2nTC/exec";
 
+        window.googleAdminKey = window.googleAdminKey || "";
+
+        function googleStudentId(studentCode) {
+            return "google-" + String(studentCode || "").trim();
+        }
+
+        function applyGoogleAttendance(records, replaceAll = false, targetStudentCodes = []) {
+            if (!state.attendanceRecords) state.attendanceRecords = {};
+
+            const targetIds = new Set(
+                (targetStudentCodes || []).map(code => googleStudentId(code))
+            );
+
+            if (replaceAll) {
+                const localOnlyRecords = {};
+                Object.entries(state.attendanceRecords).forEach(([date, dayRecord]) => {
+                    Object.entries(dayRecord || {}).forEach(([studentId, status]) => {
+                        if (!String(studentId).startsWith("google-")) {
+                            if (!localOnlyRecords[date]) localOnlyRecords[date] = {};
+                            localOnlyRecords[date][studentId] = status;
+                        }
+                    });
+                });
+                state.attendanceRecords = localOnlyRecords;
+            } else if (targetIds.size) {
+                Object.values(state.attendanceRecords).forEach(dayRecord => {
+                    targetIds.forEach(studentId => delete dayRecord[studentId]);
+                });
+            }
+
+            (records || []).forEach(record => {
+                const date = String(record.date || "").trim();
+                const studentCode = String(record.studentCode || "").trim();
+                const status = String(record.status || "").trim();
+                if (!date || !studentCode || !status) return;
+                if (!state.attendanceRecords[date]) state.attendanceRecords[date] = {};
+                state.attendanceRecords[date][googleStudentId(studentCode)] = status;
+            });
+        }
+
+        function getGoogleAdminKey() {
+            if (window.googleAdminKey) return window.googleAdminKey;
+            const key = window.prompt("Nhập mã quản trị GVCN để lưu điểm danh lên Sheet:");
+            if (!key) return "";
+            window.googleAdminKey = key;
+            return key;
+        }
+
+        function sendAttendanceToGoogle(records) {
+            const adminKey = getGoogleAdminKey();
+            if (!adminKey) return Promise.reject(new Error("Chưa nhập mã quản trị."));
+
+            return new Promise((resolve, reject) => {
+                const callbackName = "googleAttendanceCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+                const script = document.createElement("script");
+                let finished = false;
+                const timeout = setTimeout(() => finish({
+                    ok: false,
+                    message: "Không thể kết nối để lưu điểm danh."
+                }), 15000);
+
+                function cleanup() {
+                    clearTimeout(timeout);
+                    delete window[callbackName];
+                    script.remove();
+                }
+
+                function finish(response) {
+                    if (finished) return;
+                    finished = true;
+                    cleanup();
+                    if (!response || !response.ok) {
+                        if (response && response.message === "Mã quản trị không chính xác.") {
+                            window.googleAdminKey = "";
+                        }
+                        reject(new Error((response && response.message) || "Không thể lưu điểm danh."));
+                        return;
+                    }
+                    resolve(response);
+                }
+
+                window[callbackName] = finish;
+                script.onerror = () => finish({
+                    ok: false,
+                    message: "Không thể kết nối để lưu điểm danh."
+                });
+                script.src = GOOGLE_SHEET_API_URL +
+                    "?mode=attendance-save&adminKey=" + encodeURIComponent(adminKey) +
+                    "&records=" + encodeURIComponent(JSON.stringify(records)) +
+                    "&callback=" + callbackName;
+                document.head.appendChild(script);
+            });
+        }
+
+        async function sendAttendanceInChunks(records) {
+            for (let index = 0; index < records.length; index += 10) {
+                await sendAttendanceToGoogle(records.slice(index, index + 10));
+            }
+        }
+
+        window.uploadAllAttendanceToGoogle = async function() {
+            const records = [];
+            Object.entries(state.attendanceRecords || {}).forEach(([date, dayRecord]) => {
+                Object.entries(dayRecord || {}).forEach(([studentId, status]) => {
+                    const student = state.students.find(item => String(item.id) === String(studentId));
+                    if (!student || !student.studentCode || !status) return;
+                    records.push({
+                        date: date,
+                        studentCode: String(student.studentCode),
+                        status: status
+                    });
+                });
+            });
+
+            if (!records.length) {
+                return showToast("Chưa có dữ liệu điểm danh để lưu.", "error");
+            }
+
+            try {
+                await sendAttendanceInChunks(records);
+                showToast("Đã lưu toàn bộ dữ liệu chuyên cần lên Google Sheets!", "success");
+            } catch (error) {
+                showToast(error.message || "Không thể đồng bộ dữ liệu chuyên cần.", "error");
+            }
+        };
+
         function lookupParentFromGoogle(phone) {
             phone = String(phone || "").replace(/\D/g, "");
             if (!phone) return showToast("Vui lòng nhập số điện thoại PHHS", "error");
@@ -3563,6 +3727,8 @@ window.openEditGroupModal = function(id) {
 
                 state.scores = (response.scores || []).map(item => ({ ...item, studentCode: remoteStudent.studentCode }));
                 state.teacherComments = (response.comments || []).map(item => ({ ...item, studentCode: remoteStudent.studentCode }));
+                applyGoogleAttendance(response.attendance || [], false, [remoteStudent.studentCode]);
+                saveData();
                 window.googleSheetMode = true;
                 window.parentSubject = "Toán";
                 showParentView(remoteStudent.id);
@@ -3597,6 +3763,8 @@ window.openEditGroupModal = function(id) {
                 }));
                 state.scores = [];
                 state.teacherComments = [];
+                window.googleAdminKey = adminKey;
+                applyGoogleAttendance(response.attendance || [], true);
                 saveData();
                 renderLayout();
                 showToast("Đã đồng bộ " + state.students.length + " học sinh từ Google Sheets!", "success");
