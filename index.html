@@ -3566,8 +3566,21 @@ window.openEditGroupModal = function(id) {
 
         window.googleAdminKey = window.googleAdminKey || "";
 
+        function studentCodeKey(value) {
+            const code = String(value || "").trim().replace(/^'+/, "").replace(/\s+/g, "");
+            if (!code) return "";
+            return code.replace(/^0+/, "") || "0";
+        }
+
         function googleStudentId(studentCode) {
-            return "google-" + String(studentCode || "").trim();
+            const key = studentCodeKey(studentCode);
+            const matchingStudent = (state.students || []).find(student =>
+                studentCodeKey(student.studentCode) === key
+            );
+
+            return matchingStudent
+                ? String(matchingStudent.id)
+                : "google-" + String(studentCode || "").trim();
         }
 
         function applyGoogleAttendance(records, replaceAll = false, targetStudentCodes = []) {
