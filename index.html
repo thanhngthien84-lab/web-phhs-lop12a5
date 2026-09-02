@@ -2902,6 +2902,13 @@ window.closeModal = function(id) {
                                     <input type="text" id="edit-s-name" value="${escapeHtmlAttr(s.name)}" class="w-full px-5 py-3.5 bg-white border border-slate-300 rounded-xl text-base font-black text-slate-800 focus:border-blueAccent focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm">
                                 </div>
                                 
+                                <!-- Mã học sinh dùng để liên kết với Google Sheet -->
+                                <div>
+                                    <label class="block text-sm font-bold text-slate-600 mb-2">Mã học sinh <span class="text-red-500">*</span></label>
+                                    <input type="text" id="edit-s-student-code" value="${escapeHtmlAttr(s.studentCode || '')}" ${id ? 'readonly' : ''} placeholder="Ví dụ: 0150344890" class="w-full px-5 py-3.5 bg-white border border-slate-300 rounded-xl text-base font-black text-slate-800 focus:border-blueAccent focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm ${id ? 'bg-slate-100 cursor-not-allowed' : ''}">
+                                    <p class="mt-2 text-xs text-slate-400 font-medium">Mã này phải giống cột MaHS trong Google Sheet.</p>
+                                </div>
+                                
                                 <!-- Giới tính & Nhóm thi đua -->
                                 <div class="grid grid-cols-2 gap-5">
                                     <div>
@@ -2972,7 +2979,7 @@ window.closeModal = function(id) {
                             ${id ? `<button onclick="deleteStudent(${toInlineJsValue(id)}); closeModal('edit-student-modal')" class="px-6 py-3.5 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition-colors flex items-center gap-2 shadow-sm border border-red-100"><i class="ph-bold ph-trash"></i> Xóa</button>` : '<div></div>'}
                             <div class="flex gap-3">
                                 <button onclick="closeModal('edit-student-modal')" class="px-8 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors">Hủy</button>
-                                <button onclick="saveStudentEdit()" class="px-10 py-3.5 bg-[#0f172a] text-white font-black rounded-xl hover:bg-black shadow-lg transition-all hover:-translate-y-0.5">Lưu Hồ Sơ</button>
+                                <button id="save-student-button" onclick="saveStudentEdit()" class="px-10 py-3.5 bg-[#0f172a] text-white font-black rounded-xl hover:bg-black shadow-lg transition-all hover:-translate-y-0.5">Lưu Hồ Sơ</button>
                             </div>
                         </div>
                     </div>
@@ -2981,51 +2988,162 @@ window.closeModal = function(id) {
             document.getElementById('modal-container').innerHTML = modalHtml;
         }
 
-window.saveStudentEdit = function() {
-    // 1. Lấy dữ liệu từ các ô nhập liệu
-    const nameInput = document.getElementById('edit-s-name').value.trim();
+window.requestStudentSaveToGoogle = function(studentPayload, adminKey) {
+    return new Promise((resolve, reject) => {
+        const callbackName = "googleStudentSaveCallback_" + Date.now() + "_" +
+            Math.floor(Math.random() * 10000);
+        const script = document.createElement("script");
+        let finished = false;
+        const timeout = setTimeout(() => finish({
+            ok: false,
+            message: "Hệ thống phản hồi chậm khi lưu học sinh."
+        }), 30000);
+
+        function cleanup() {
+            clearTimeout(timeout);
+            delete window[callbackName];
+            script.remove();
+        }
+
+        function finish(response) {
+            if (finished) return;
+            finished = true;
+            cleanup();
+            if (!response || !response.ok || !response.student) {
+                const message = (response && response.message) ||
+                    "Không thể lưu học sinh lên Google Sheet.";
+                if (message === "Mã quản trị không chính xác.") {
+                    window.googleAdminKey = "";
+                }
+                reject(new Error(message));
+                return;
+            }
+            resolve(response);
+        }
+
+        window[callbackName] = finish;
+        script.onerror = () => finish({
+            ok: false,
+            message: "Không thể kết nối để lưu học sinh."
+        });
+        script.src = GOOGLE_SHEET_API_URL +
+            "?mode=student-save&adminKey=" + encodeURIComponent(adminKey) +
+            "&student=" + encodeURIComponent(JSON.stringify(studentPayload)) +
+            "&callback=" + callbackName;
+        document.head.appendChild(script);
+    });
+};
+
+window.saveStudentEdit = async function() {
+    const nameInput = document.getElementById("edit-s-name").value.trim();
+    const studentCode = document.getElementById("edit-s-student-code")
+        .value.trim();
+
     if (!nameInput) {
         return showToast("Vui lòng nhập họ và tên học sinh!", "error");
     }
-
-    // 2. Thu thập toàn bộ thông tin trên form
-    const studentData = {
-        name: nameInput,
-        avatarUrl: document.getElementById('edit-s-avatar').value.trim(),
-        gender: document.getElementById('edit-s-gender').value,
-        group: document.getElementById('edit-s-group').value,
-        dob: document.getElementById('edit-s-dob').value,
-        boardingType: document.getElementById('edit-s-boarding').value,
-        code: document.getElementById('edit-s-code').value,
-        role: document.getElementById('edit-s-role').value.trim(),
-        goal: document.getElementById('edit-s-goal').value.trim(),
-        talent: document.getElementById('edit-s-talent').value.trim()
-    };
-
-    // 3. Xử lý Lưu (Cập nhật người cũ hoặc Thêm người mới)
-    if (state.editingStudentId) {
-        const index = state.students.findIndex(s => s.id === state.editingStudentId);
-        if (index > -1) {
-            state.students[index] = { ...state.students[index], ...studentData };
-            showToast("Đã cập nhật hồ sơ học sinh thành công!", "success");
-        }
-    } else {
-        const newId = state.students.length > 0 ? Math.max(...state.students.map(s => s.id)) + 1 : 1;
-        state.students.push({
-            ...studentData,
-            id: newId,
-            points: 0,
-            stars: 0,
-            history: [],
-            comment: ''
-        });
-        showToast("Đã thêm học sinh mới thành công!", "success");
+    if (!studentCode) {
+        return showToast("Vui lòng nhập mã học sinh!", "error");
     }
 
-    // 4. Lưu dữ liệu, cập nhật giao diện và đóng form
-    saveData();
-    renderLayout();
-    closeModal('edit-student-modal');
+    const currentStudent = state.editingStudentId
+        ? state.students.find(student => student.id === state.editingStudentId)
+        : null;
+    const duplicateStudent = state.students.find(student =>
+        String(student.studentCode || "").trim() === studentCode &&
+        (!currentStudent || student.id !== currentStudent.id)
+    );
+    if (duplicateStudent) {
+        return showToast("Mã học sinh này đã tồn tại!", "error");
+    }
+
+    const isNewStudent = !currentStudent;
+    const studentData = {
+        name: nameInput,
+        studentCode: studentCode,
+        avatarUrl: document.getElementById("edit-s-avatar").value.trim(),
+        gender: document.getElementById("edit-s-gender").value,
+        group: document.getElementById("edit-s-group").value,
+        dob: document.getElementById("edit-s-dob").value,
+        boardingType: document.getElementById("edit-s-boarding").value,
+        code: document.getElementById("edit-s-code").value,
+        role: document.getElementById("edit-s-role").value.trim(),
+        goal: document.getElementById("edit-s-goal").value.trim(),
+        talent: document.getElementById("edit-s-talent").value.trim()
+    };
+
+    const adminKey = getGoogleAdminKey();
+    if (!adminKey) return;
+
+    const saveButton = document.getElementById("save-student-button");
+    if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = "ĐANG LƯU...";
+    }
+    showToast("Đang lưu học sinh lên Google Sheet...", "success");
+
+    try {
+        const response = await requestStudentSaveToGoogle({
+            isNew: isNewStudent,
+            originalStudentCode: currentStudent
+                ? String(currentStudent.studentCode || "").trim()
+                : "",
+            studentCode: studentCode,
+            name: nameInput,
+            lookupCode: currentStudent
+                ? String(currentStudent.parentPhone || "").trim()
+                : "",
+            khoiThi: currentStudent
+                ? String(currentStudent.khoiThi || "").trim()
+                : "",
+            tongDiemMucTieu: currentStudent
+                ? String(currentStudent.tongDiemMucTieu || "").trim()
+                : ""
+        }, adminKey);
+
+        window.googleAdminKey = adminKey;
+        studentData.parentPhone = String(
+            response.student.parentPhone || ""
+        ).trim();
+
+        if (currentStudent) {
+            const index = state.students.findIndex(
+                student => student.id === currentStudent.id
+            );
+            state.students[index] = {
+                ...state.students[index],
+                ...studentData
+            };
+        } else {
+            state.students.push({
+                ...studentData,
+                id: "google-" + studentCode,
+                points: 0,
+                stars: 0,
+                history: [],
+                comment: ""
+            });
+        }
+
+        saveData();
+        renderLayout();
+        closeModal("edit-student-modal");
+        showToast(
+            isNewStudent
+                ? "Đã thêm học sinh và lưu lên Google Sheet!"
+                : "Đã cập nhật học sinh trên Google Sheet!",
+            "success"
+        );
+    } catch (error) {
+        if (saveButton && saveButton.isConnected) {
+            saveButton.disabled = false;
+            saveButton.textContent = "Lưu Hồ Sơ";
+        }
+        showToast(
+            error.message || "Không thể lưu học sinh lên Google Sheet.",
+            "error"
+        );
+    }
 };
 
 window.deleteStudent = function(id) {
