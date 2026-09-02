@@ -44,6 +44,30 @@ function doGet(e) {
       );
     }
 
+    if (mode === "student-save") {
+      assertAdminKey(parameters.adminKey);
+
+      let student;
+      try {
+        student = JSON.parse(String(parameters.student || "{}"));
+      } catch (error) {
+        throw new Error("Dữ liệu học sinh không hợp lệ.");
+      }
+
+      const savedStudent = saveStudentRecord(
+        SpreadsheetApp.getActiveSpreadsheet(),
+        student
+      );
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          student: savedStudent
+        },
+        callback
+      );
+    }
+
     if (mode === "lookup-codes-generate") {
       assertAdminKey(parameters.adminKey);
 
@@ -226,6 +250,99 @@ function savePublicSettings(ss, classNameValue) {
     }
 
     return { className: className };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function normalizeStudentCode(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^'+/, "")
+    .replace(/\s+/g, "");
+}
+
+function saveStudentRecord(ss, input) {
+  const studentCode = normalizeStudentCode(input && input.studentCode);
+  const originalStudentCode = normalizeStudentCode(
+    input && input.originalStudentCode
+  );
+  const name = String((input && input.name) || "").trim();
+  const isNew = Boolean(input && input.isNew);
+
+  if (!studentCode) throw new Error("Mã học sinh không được để trống.");
+  if (!name) throw new Error("Họ tên học sinh không được để trống.");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+
+  try {
+    const sheet = ss.getSheetByName("HOC_SINH");
+    if (!sheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
+
+    const values = sheet.getDataRange().getDisplayValues();
+    const headers = values[0].map(normalizeHeader);
+    const idColumn = requireColumn(headers, "mahs", "Mã HS");
+    const nameColumn = requireColumn(headers, "hoten", "Họ tên");
+    const lookupColumn = findFirstColumn(
+      headers,
+      ["matracuu", "pinphhs", "sdtphhs"]
+    );
+    const blockColumn = headers.indexOf("khoithi");
+    const goalColumn = headers.indexOf("tongdiemmuctieu");
+    let targetRow = 0;
+
+    for (let row = 1; row < values.length; row++) {
+      const rowCode = normalizeStudentCode(values[row][idColumn]);
+      if (rowCode === (isNew ? studentCode : originalStudentCode)) {
+        targetRow = row + 1;
+        break;
+      }
+    }
+
+    if (isNew && targetRow) {
+      throw new Error("Mã học sinh này đã tồn tại trên Google Sheet.");
+    }
+    if (!isNew && !targetRow) {
+      throw new Error("Không tìm thấy học sinh cần cập nhật trên Google Sheet.");
+    }
+    if (!targetRow) targetRow = Math.max(sheet.getLastRow() + 1, 2);
+
+    sheet.getRange(targetRow, idColumn + 1)
+      .setNumberFormat("@")
+      .setValue(studentCode);
+    sheet.getRange(targetRow, nameColumn + 1).setValue(name);
+
+    if (lookupColumn >= 0 && input.lookupCode !== undefined) {
+      const lookupCode = normalizePhone(input.lookupCode);
+      sheet.getRange(targetRow, lookupColumn + 1)
+        .setNumberFormat("@")
+        .setValue(lookupCode);
+    }
+    if (blockColumn >= 0 && input.khoiThi !== undefined) {
+      sheet.getRange(targetRow, blockColumn + 1)
+        .setValue(String(input.khoiThi || "").trim());
+    }
+    if (goalColumn >= 0 && input.tongDiemMucTieu !== undefined) {
+      sheet.getRange(targetRow, goalColumn + 1)
+        .setValue(String(input.tongDiemMucTieu || "").trim());
+    }
+
+    SpreadsheetApp.flush();
+
+    return {
+      studentCode: studentCode,
+      name: name,
+      parentPhone: lookupColumn >= 0
+        ? sheet.getRange(targetRow, lookupColumn + 1).getDisplayValue()
+        : "",
+      khoiThi: blockColumn >= 0
+        ? sheet.getRange(targetRow, blockColumn + 1).getDisplayValue()
+        : "",
+      tongDiemMucTieu: goalColumn >= 0
+        ? sheet.getRange(targetRow, goalColumn + 1).getDisplayValue()
+        : ""
+    };
   } finally {
     lock.releaseLock();
   }
