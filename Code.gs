@@ -170,14 +170,28 @@ function doGet(e) {
       parameters.lookupCode || parameters.phone || ""
     );
     if (!/^\d{5}$/.test(lookupCode)) {
+      registerParentLookupFailure("");
       return output(
         { ok: false, message: "Mã tra cứu phải gồm đúng 5 chữ số." },
         callback
       );
     }
 
+    const lookupLimit = getParentLookupRateLimit(lookupCode);
+    if (lookupLimit.blocked) {
+      return output(
+        {
+          ok: false,
+          message: "Có quá nhiều lượt nhập sai. Vui lòng chờ một lát rồi thử lại.",
+          retryAfterSeconds: lookupLimit.retryAfterSeconds
+        },
+        callback
+      );
+    }
+
     const data = getStudentData(lookupCode);
     if (!data) {
+      registerParentLookupFailure(lookupCode);
       return output(
         { ok: false, message: "Mã tra cứu không chính xác." },
         callback
@@ -198,6 +212,117 @@ function doGet(e) {
       },
       callback
     );
+  }
+}
+
+function readParentLookupCounter(cache, key) {
+  const raw = cache.get(key);
+  if (!raw) return { count: 0, expiresAt: 0 };
+
+  try {
+    const value = JSON.parse(raw);
+    const expiresAt = Number(value.expiresAt || 0);
+    if (!expiresAt || expiresAt <= Date.now()) {
+      cache.remove(key);
+      return { count: 0, expiresAt: 0 };
+    }
+    return {
+      count: Number(value.count || 0),
+      expiresAt: expiresAt
+    };
+  } catch (error) {
+    cache.remove(key);
+    return { count: 0, expiresAt: 0 };
+  }
+}
+
+function writeParentLookupCounter(cache, key, counter, ttlSeconds) {
+  cache.put(
+    key,
+    JSON.stringify(counter),
+    Math.max(1, Math.min(Number(ttlSeconds || 1), 21600))
+  );
+}
+
+function getParentLookupRateLimit(lookupCode) {
+  const cache = CacheService.getScriptCache();
+  const now = Date.now();
+  const globalCounter = readParentLookupCounter(
+    cache,
+    "parent_lookup_failures_global_v1"
+  );
+
+  if (globalCounter.count >= 300) {
+    return {
+      blocked: true,
+      retryAfterSeconds: Math.max(
+        1,
+        Math.ceil((globalCounter.expiresAt - now) / 1000)
+      )
+    };
+  }
+
+  if (/^\d{5}$/.test(lookupCode)) {
+    const codeCounter = readParentLookupCounter(
+      cache,
+      "parent_lookup_failures_code_v1_" + lookupCode
+    );
+    if (codeCounter.count >= 6) {
+      return {
+        blocked: true,
+        retryAfterSeconds: Math.max(
+          1,
+          Math.ceil((codeCounter.expiresAt - now) / 1000)
+        )
+      };
+    }
+  }
+
+  return { blocked: false, retryAfterSeconds: 0 };
+}
+
+function registerParentLookupFailure(lookupCode) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1500)) return;
+
+  try {
+    const cache = CacheService.getScriptCache();
+    const now = Date.now();
+    const globalKey = "parent_lookup_failures_global_v1";
+    const globalCounter = readParentLookupCounter(cache, globalKey);
+    const globalExpiresAt = globalCounter.expiresAt > now
+      ? globalCounter.expiresAt
+      : now + 5 * 60 * 1000;
+
+    writeParentLookupCounter(
+      cache,
+      globalKey,
+      {
+        count: globalCounter.count + 1,
+        expiresAt: globalExpiresAt
+      },
+      Math.ceil((globalExpiresAt - now) / 1000)
+    );
+
+    if (/^\d{5}$/.test(lookupCode)) {
+      const codeKey = "parent_lookup_failures_code_v1_" + lookupCode;
+      const codeCounter = readParentLookupCounter(cache, codeKey);
+      const codeExpiresAt = codeCounter.expiresAt > now
+        ? codeCounter.expiresAt
+        : now + 10 * 60 * 1000;
+
+      writeParentLookupCounter(
+        cache,
+        codeKey,
+        {
+          count: codeCounter.count + 1,
+          expiresAt: codeExpiresAt
+        },
+        Math.ceil((codeExpiresAt - now) / 1000)
+      );
+    }
+  } finally {
+    lock.releaseLock();
   }
 }
 
