@@ -935,8 +935,9 @@ window.closeModal = function(id) {
                             </h2>
                             <p class="text-slate-500 text-sm font-medium mt-1">Thông tin chi tiết, vai trò và mục tiêu phấn đấu của các em</p>
                         </div>
-                        <div class="flex gap-3 w-full sm:w-auto">
+                        <div class="flex flex-wrap gap-3 w-full sm:w-auto">
                             <button onclick="syncClassFromGoogle()" class="flex-1 sm:flex-none px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ Sheet</button>
+                            <button id="generate-lookup-codes-button" onclick="generateMissingLookupCodes()" class="flex-1 sm:flex-none px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-xl text-sm shadow-sm hover:bg-amber-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-key text-lg"></i> Tạo mã PIN</button>
                             <button onclick="openEditStudentModal(null)" class="flex-1 sm:flex-none px-5 py-3 bg-[#0f172a] text-white font-bold rounded-xl text-sm shadow-md hover:bg-black transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-user-plus text-lg"></i> Thêm HS</button>
                             <button onclick="downloadTemplate()" class="flex-1 sm:flex-none px-5 py-3 bg-white text-slate-600 border border-slate-200 font-bold rounded-xl text-sm shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"><i class="ph-fill ph-download-simple text-green-600 text-lg"></i> File mẫu</button>
                             <button onclick="openImportModal()" class="flex-1 sm:flex-none px-5 py-3 bg-blue-50 text-blue-700 border border-blue-100 font-bold rounded-xl text-sm shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-upload-simple text-lg"></i> Nhập DS</button>
@@ -4167,6 +4168,99 @@ window.openEditGroupModal = function(id) {
             window.parentSubject = "Toán";
             showParentView(remoteStudent.id);
         }
+
+        window.generateMissingLookupCodes = function() {
+            if (!window.confirm(
+                "Tạo mã tra cứu ngẫu nhiên 5 chữ số cho học sinh chưa có mã hợp lệ? Các mã 5 chữ số hiện có sẽ được giữ nguyên."
+            )) return;
+
+            const adminKey = getGoogleAdminKey();
+            if (!adminKey) return;
+
+            const button = document.getElementById("generate-lookup-codes-button");
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<i class="ph-bold ph-spinner-gap text-lg animate-spin"></i> Đang tạo mã...';
+            }
+
+            showToast("Đang tạo mã tra cứu và lưu lên Google Sheets...", "success");
+            const callbackName = "googleLookupCodesCallback_" + Date.now() + "_" +
+                Math.floor(Math.random() * 10000);
+            const script = document.createElement("script");
+            let finished = false;
+            const timeout = setTimeout(() => finish({
+                ok: false,
+                message: "Hệ thống phản hồi chậm khi tạo mã tra cứu."
+            }), 30000);
+
+            function cleanup() {
+                clearTimeout(timeout);
+                delete window[callbackName];
+                script.remove();
+            }
+
+            function restoreButton() {
+                if (!button || !button.isConnected) return;
+                button.disabled = false;
+                button.innerHTML = '<i class="ph-bold ph-key text-lg"></i> Tạo mã PIN';
+            }
+
+            function finish(response) {
+                if (finished) return;
+                finished = true;
+                cleanup();
+                restoreButton();
+
+                if (!response || !response.ok || !Array.isArray(response.students)) {
+                    const message = (response && response.message) ||
+                        "Không thể tạo mã tra cứu.";
+                    if (message === "Mã quản trị không chính xác.") {
+                        window.googleAdminKey = "";
+                    }
+                    showToast(message, "error");
+                    return;
+                }
+
+                window.googleAdminKey = adminKey;
+                state.students = response.students.map(student => ({
+                    id: "google-" + student.studentCode,
+                    studentCode: student.studentCode,
+                    name: student.name,
+                    parentPhone: student.parentPhone,
+                    khoiThi: student.khoiThi,
+                    tongDiemMucTieu: student.tongDiemMucTieu,
+                    points: 0,
+                    stars: 0,
+                    group: "",
+                    role: "",
+                    talent: "",
+                    avatarUrl: "",
+                    gender: "",
+                    history: []
+                }));
+                saveData();
+                renderLayout();
+
+                const count = Number(response.generatedCount || 0);
+                showToast(
+                    count
+                        ? "Đã tạo và lưu " + count + " mã tra cứu mới!"
+                        : "Tất cả học sinh đã có mã tra cứu hợp lệ.",
+                    "success"
+                );
+            }
+
+            window[callbackName] = finish;
+            script.onerror = () => finish({
+                ok: false,
+                message: "Không thể kết nối để tạo mã tra cứu."
+            });
+            script.src = GOOGLE_SHEET_API_URL +
+                "?mode=lookup-codes-generate&adminKey=" +
+                encodeURIComponent(adminKey) +
+                "&callback=" + callbackName;
+            document.head.appendChild(script);
+        };
 
         window.syncClassFromGoogle = function() {
             const adminKey = window.prompt("Nhập mã quản trị GVCN để đồng bộ danh sách:");
