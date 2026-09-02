@@ -1493,6 +1493,203 @@ window.closeModal = function(id) {
             renderLayout(); 
         };
 
+        window.attendanceSaveMeta = window.attendanceSaveMeta || {};
+        window.attendanceAutoSaveTimers = window.attendanceAutoSaveTimers || {};
+        window.attendanceSaveQueue = window.attendanceSaveQueue || Promise.resolve();
+
+        function getAttendanceSaveMeta(date) {
+            const key = String(date || "");
+            if (!window.attendanceSaveMeta[key]) {
+                window.attendanceSaveMeta[key] = {
+                    status: "idle",
+                    version: 0,
+                    savedAt: "",
+                    message: "",
+                    pending: null
+                };
+            }
+            return window.attendanceSaveMeta[key];
+        }
+
+        function renderAttendanceSaveStatus(date) {
+            const meta = getAttendanceSaveMeta(date);
+            let icon = "ph-cloud-check";
+            let label = "Chưa có thay đổi mới";
+            let classes = "bg-slate-50 text-slate-600 border-slate-200";
+
+            if (meta.status === "dirty") {
+                icon = "ph-cloud-arrow-up";
+                label = "Có thay đổi chưa lưu · hệ thống sẽ tự lưu";
+                classes = "bg-amber-50 text-amber-700 border-amber-200";
+            } else if (meta.status === "saving") {
+                icon = "ph-spinner-gap animate-spin";
+                label = "Đang lưu lên Google Sheet...";
+                classes = "bg-blue-50 text-blue-700 border-blue-200";
+            } else if (meta.status === "saved") {
+                icon = "ph-check-circle";
+                const savedDate = new Date(meta.savedAt || "");
+                const savedTime = Number.isNaN(savedDate.getTime())
+                    ? ""
+                    : savedDate.toLocaleTimeString("vi-VN");
+                label = savedTime
+                    ? "Đã lưu lên Sheet lúc " + savedTime
+                    : "Đã lưu lên Google Sheet";
+                classes = "bg-emerald-50 text-emerald-700 border-emerald-200";
+            } else if (meta.status === "error") {
+                icon = "ph-warning-circle";
+                label = "Chưa lưu được · bấm “Lưu lên Sheet” để thử lại";
+                classes = "bg-red-50 text-red-700 border-red-200";
+            }
+
+            return `
+                <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border ${classes}">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <i class="ph-bold ${icon} text-lg flex-shrink-0"></i>
+                        <span class="text-xs sm:text-sm font-bold">${label}</span>
+                    </div>
+                    ${meta.status === "error" && meta.message
+                        ? `<span class="hidden lg:block text-xs truncate max-w-md" title="${escapeHtmlAttr(meta.message)}">${escapeHtmlText(meta.message)}</span>`
+                        : ""}
+                </div>
+            `;
+        }
+
+        function refreshAttendanceSaveStatus(date) {
+            if (String(date) !== String(currentAttendanceDate)) return;
+            const statusElement = document.getElementById(
+                "attendance-save-status"
+            );
+            if (statusElement) {
+                statusElement.innerHTML = renderAttendanceSaveStatus(date);
+            }
+
+            const button = document.getElementById("attendance-upload-button");
+            if (!button) return;
+            const saving = getAttendanceSaveMeta(date).status === "saving";
+            button.disabled = saving;
+            button.innerHTML = saving
+                ? '<i class="ph-bold ph-spinner-gap text-lg animate-spin"></i> Đang lưu...'
+                : '<i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet';
+        }
+
+        function markAttendanceDateDirty(date) {
+            const meta = getAttendanceSaveMeta(date);
+            meta.version += 1;
+            meta.status = "dirty";
+            meta.message = "";
+            refreshAttendanceSaveStatus(date);
+        }
+
+        function buildAttendanceRecordsForDate(date) {
+            const dayRecord = (state.attendanceRecords || {})[date] || {};
+            return state.students
+                .filter(student => String(student.studentCode || "").trim())
+                .map(student => ({
+                    date: String(date),
+                    studentCode: String(student.studentCode),
+                    status: String(dayRecord[student.id] || "")
+                }));
+        }
+
+        function scheduleAttendanceAutoSave(date, delay = 900) {
+            const key = String(date || "");
+            clearTimeout(window.attendanceAutoSaveTimers[key]);
+            window.attendanceAutoSaveTimers[key] = setTimeout(() => {
+                delete window.attendanceAutoSaveTimers[key];
+                enqueueAttendanceSave(key, { automatic: true })
+                    .catch(error => {
+                        const meta = getAttendanceSaveMeta(key);
+                        if (!meta.errorNotified) {
+                            meta.errorNotified = true;
+                            showToast(
+                                "Điểm danh đang được giữ trên máy nhưng chưa lưu lên Sheet. Hãy bấm “Lưu lên Sheet” để thử lại.",
+                                "error"
+                            );
+                        }
+                    });
+            }, delay);
+        }
+
+        function enqueueAttendanceSave(date, options = {}) {
+            const key = String(date || "").trim();
+            const meta = getAttendanceSaveMeta(key);
+            if (meta.pending) return meta.pending;
+
+            clearTimeout(window.attendanceAutoSaveTimers[key]);
+            delete window.attendanceAutoSaveTimers[key];
+
+            const queuedTask = (window.attendanceSaveQueue || Promise.resolve())
+                .catch(() => {})
+                .then(async () => {
+                    const activeMeta = getAttendanceSaveMeta(key);
+                    const savingVersion = activeMeta.version;
+                    const records = buildAttendanceRecordsForDate(key);
+
+                    if (!records.length) {
+                        const noStudentsError = new Error(
+                            "Không có học sinh có mã để lưu điểm danh."
+                        );
+                        activeMeta.status = "error";
+                        activeMeta.message = noStudentsError.message;
+                        refreshAttendanceSaveStatus(key);
+                        throw noStudentsError;
+                    }
+
+                    activeMeta.status = "saving";
+                    activeMeta.message = "";
+                    refreshAttendanceSaveStatus(key);
+
+                    try {
+                        await sendAttendanceInChunks(records);
+                        activeMeta.savedAt = new Date().toISOString();
+                        activeMeta.errorNotified = false;
+
+                        if (activeMeta.version === savingVersion) {
+                            activeMeta.status = "saved";
+                        } else {
+                            activeMeta.status = "dirty";
+                            scheduleAttendanceAutoSave(key, 500);
+                        }
+
+                        refreshAttendanceSaveStatus(key);
+                        return {
+                            savedCount: records.length,
+                            automatic: Boolean(options.automatic)
+                        };
+                    } catch (error) {
+                        activeMeta.status = "error";
+                        activeMeta.message = (error && error.message) ||
+                            "Không thể lưu điểm danh.";
+                        refreshAttendanceSaveStatus(key);
+                        throw error;
+                    }
+                });
+
+            meta.pending = queuedTask;
+            window.attendanceSaveQueue = queuedTask.catch(() => {});
+            queuedTask.then(
+                () => {
+                    if (meta.pending === queuedTask) meta.pending = null;
+                },
+                () => {
+                    if (meta.pending === queuedTask) meta.pending = null;
+                }
+            );
+            return queuedTask;
+        }
+
+        if (!window.attendanceOnlineRetryBound) {
+            window.attendanceOnlineRetryBound = true;
+            window.addEventListener("online", () => {
+                Object.keys(window.attendanceSaveMeta || {}).forEach(date => {
+                    const meta = getAttendanceSaveMeta(date);
+                    if (meta.status === "dirty" || meta.status === "error") {
+                        scheduleAttendanceAutoSave(date, 200);
+                    }
+                });
+            });
+        }
+
         function renderViewDiemDanh() {
             if (!state.attendanceRecords) state.attendanceRecords = {};
             if (!state.attendanceTab) state.attendanceTab = 'diem-danh';
@@ -1671,13 +1868,15 @@ window.closeModal = function(id) {
         function markAttendance(id, status) {
             const list = document.getElementById("attendance-student-list");
             const scrollTop = list ? list.scrollTop : 0;
-            const dayRecord = state.attendanceRecords[currentAttendanceDate];
+            const selectedDate = String(currentAttendanceDate);
+            const dayRecord = state.attendanceRecords[selectedDate];
             const previousStatus = dayRecord[id] || "";
             const nextStatus = previousStatus === status ? "" : status;
 
             if (nextStatus) dayRecord[id] = nextStatus;
             else delete dayRecord[id];
 
+            markAttendanceDateDirty(selectedDate);
             saveData();
             renderLayout();
 
@@ -1686,56 +1885,37 @@ window.closeModal = function(id) {
                 if (newList) newList.scrollTop = scrollTop;
             });
 
-            const student = state.students.find(item => String(item.id) === String(id));
-            if (!student || !student.studentCode) return;
-
-            sendAttendanceToGoogle([{
-                date: currentAttendanceDate,
-                studentCode: String(student.studentCode),
-                status: nextStatus
-            }]).catch(error => {
-                if (previousStatus) dayRecord[id] = previousStatus;
-                else delete dayRecord[id];
-                saveData();
-                renderLayout();
-                showToast(error.message || "Không thể lưu điểm danh.", "error");
-            });
+            const student = state.students.find(item =>
+                String(item.id) === String(id)
+            );
+            if (student && student.studentCode) {
+                scheduleAttendanceAutoSave(selectedDate);
+            }
         }
 
         function markAllPresent() {
-            const previousRecord = { ...(state.attendanceRecords[currentAttendanceDate] || {}) };
-            state.attendanceRecords[currentAttendanceDate] = {};
-            const records = [];
+            const selectedDate = String(currentAttendanceDate);
+            state.attendanceRecords[selectedDate] = {};
 
             state.students.forEach(student => {
-                state.attendanceRecords[currentAttendanceDate][student.id] = "present";
-                if (student.studentCode) {
-                    records.push({
-                        date: currentAttendanceDate,
-                        studentCode: String(student.studentCode),
-                        status: "present"
-                    });
-                }
+                state.attendanceRecords[selectedDate][student.id] = "present";
             });
 
+            markAttendanceDateDirty(selectedDate);
             saveData();
             renderLayout();
-
-            if (!records.length) {
-                return showToast("Đã đánh dấu tất cả có mặt!", "success");
-            }
-
-            sendAttendanceInChunks(records)
-                .then(() => showToast("Đã điểm danh và đồng bộ cả lớp!", "success"))
-                .catch(error => {
-                    state.attendanceRecords[currentAttendanceDate] = previousRecord;
-                    saveData();
-                    renderLayout();
-                    showToast(error.message || "Không thể lưu điểm danh.", "error");
-                });
+            scheduleAttendanceAutoSave(selectedDate, 100);
+            showToast(
+                "Đã đánh dấu cả lớp có mặt. Hệ thống đang lưu lên Sheet...",
+                "success"
+            );
         }
 
-        function changeAttendanceDate(d) { if(d) { currentAttendanceDate = d; renderLayout(); } }
+        function changeAttendanceDate(date) {
+            if (!date) return;
+            currentAttendanceDate = date;
+            renderLayout();
+        }
 
         // --- NEW RANDOM PICKER ENGINE VARIABLES ---
         let pickerMode = 'chaos'; // chaos, spiral, wave, planet, figure8, bubbles
@@ -2651,6 +2831,9 @@ window.closeModal = function(id) {
                         <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200">
                             <div class="text-[11px] font-black uppercase tracking-wider text-slate-400">Kiểm tra lúc</div>
                             <div class="mt-1 font-bold text-slate-700 text-sm">${escapeHtmlText(checkedAt || "Vừa xong")}</div>
+                        </div>
+                        <div id="attendance-save-status" class="w-full">
+                            ${renderAttendanceSaveStatus(currentAttendanceDate)}
                         </div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -4291,6 +4474,7 @@ window.openEditGroupModal = function(id) {
                     true,
                     studentCodes
                 );
+                window.attendanceSaveMeta = {};
                 saveData();
                 restoreButton();
                 renderLayout();
@@ -4320,7 +4504,7 @@ window.openEditGroupModal = function(id) {
                     ok: false,
                     retryable: true,
                     message: "Máy chủ phản hồi chậm. Đang thử kết nối lại..."
-                }), 40000);
+                }), 25000);
 
                 function cleanup() {
                     clearTimeout(timeout);
@@ -4373,13 +4557,18 @@ window.openEditGroupModal = function(id) {
             if (!adminKey) throw new Error("Chưa nhập mã quản trị.");
 
             let lastError;
-            for (let attempt = 0; attempt < 2; attempt++) {
+            const retryDelays = [900, 2200];
+            for (let attempt = 0; attempt < 3; attempt++) {
                 try {
                     return await requestAttendanceSave(records, adminKey);
                 } catch (error) {
                     lastError = error;
-                    if (!error.retryable || attempt === 1) throw error;
-                    await new Promise(resolve => setTimeout(resolve, 1200));
+                    if (!error.retryable || attempt === 2) throw error;
+                    await new Promise(resolve => setTimeout(
+                        resolve,
+                        retryDelays[attempt] +
+                        Math.floor(Math.random() * 500)
+                    ));
                 }
             }
 
@@ -4394,60 +4583,34 @@ window.openEditGroupModal = function(id) {
         }
 
         window.uploadAllAttendanceToGoogle = async function() {
-            if (window.attendanceSaveInProgress) {
-                return showToast("Dữ liệu điểm danh đang được lưu, vui lòng chờ.", "error");
-            }
-
             const selectedDate = String(currentAttendanceDate || "").trim();
-            const dayRecord = (state.attendanceRecords || {})[selectedDate] || {};
-            const records = [];
+            const meta = getAttendanceSaveMeta(selectedDate);
 
-            Object.entries(dayRecord).forEach(([studentId, status]) => {
-                const student = state.students.find(item =>
-                    String(item.id) === String(studentId)
-                );
-                if (!student || !student.studentCode || !status) return;
-
-                records.push({
-                    date: selectedDate,
-                    studentCode: String(student.studentCode),
-                    status: status
-                });
-            });
-
-            if (!records.length) {
+            if (meta.pending || meta.status === "saving") {
                 return showToast(
-                    "Ngày đang chọn chưa có dữ liệu điểm danh để lưu.",
-                    "error"
+                    "Dữ liệu điểm danh đang được lưu, vui lòng chờ.",
+                    "success"
                 );
-            }
-
-            const button = document.getElementById("attendance-upload-button");
-            window.attendanceSaveInProgress = true;
-            if (button) {
-                button.disabled = true;
-                button.innerHTML = '<i class="ph-bold ph-spinner-gap text-lg animate-spin"></i> Đang lưu...';
             }
 
             try {
-                await sendAttendanceInChunks(records);
+                const result = await enqueueAttendanceSave(
+                    selectedDate,
+                    { automatic: false }
+                );
                 showToast(
-                    "Đã lưu " + records.length + " lượt điểm danh ngày " +
-                    formatDateForDisplay(selectedDate) + " lên Google Sheets!",
+                    "Đã lưu điểm danh của " + result.savedCount +
+                    " học sinh ngày " +
+                    formatDateForDisplay(selectedDate) +
+                    " lên Google Sheets!",
                     "success"
                 );
             } catch (error) {
                 showToast(
                     (error && error.message) ||
-                    "Không thể lưu điểm danh. Vui lòng thử lại.",
+                    "Chưa thể lưu lên Sheet. Dữ liệu vẫn được giữ trên máy để bạn thử lại.",
                     "error"
                 );
-            } finally {
-                window.attendanceSaveInProgress = false;
-                if (button && button.isConnected) {
-                    button.disabled = false;
-                    button.innerHTML = '<i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet';
-                }
             }
         };
 
