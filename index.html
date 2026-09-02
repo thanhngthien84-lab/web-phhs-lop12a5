@@ -4077,7 +4077,7 @@ window.openEditGroupModal = function(id) {
                         <h3 class="font-black text-slate-800 text-3xl mb-2 tracking-tight">Cổng Phụ Huynh</h3>
                         <p class="text-sm text-slate-500 mb-10 font-medium">Nhập mã tra cứu để xem hồ sơ học tập</p>
                         <input type="tel" inputmode="numeric" id="lookup-code-input" placeholder="VD: 12345" class="w-full px-5 py-5 bg-slate-50 border-2 border-slate-200 rounded-2xl text-2xl font-black text-center tracking-[0.12em] text-slate-800 focus:border-orange-400 outline-none mb-8 shadow-inner transition-colors" maxlength="5" autocomplete="off" onkeypress="if(event.key === 'Enter') performParentLookup()">
-                        <button onclick="performParentLookup()" class="w-full py-4.5 bg-gradient-to-r from-orange-400 to-red-500 text-white font-black rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all text-lg tracking-wider">TRA CỨU NGAY</button>
+                        <button id="parent-lookup-submit-button" onclick="performParentLookup()" class="w-full py-4.5 bg-gradient-to-r from-orange-400 to-red-500 text-white font-black rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all text-lg tracking-wider disabled:opacity-60 disabled:cursor-wait disabled:hover:translate-y-0">TRA CỨU NGAY</button>
                     </div>
                 </div>
             `;
@@ -4614,6 +4614,100 @@ window.openEditGroupModal = function(id) {
             }
         };
 
+        const PARENT_LOOKUP_GUARD_KEY =
+            "chuyen_tau_parent_lookup_guard_v1";
+
+        function readParentLookupGuard() {
+            try {
+                const raw = sessionStorage.getItem(
+                    PARENT_LOOKUP_GUARD_KEY
+                );
+                if (!raw) return { failures: 0, blockedUntil: 0 };
+                const value = JSON.parse(raw);
+                return {
+                    failures: Number(value.failures || 0),
+                    blockedUntil: Number(value.blockedUntil || 0)
+                };
+            } catch (error) {
+                return { failures: 0, blockedUntil: 0 };
+            }
+        }
+
+        function writeParentLookupGuard(guard) {
+            try {
+                sessionStorage.setItem(
+                    PARENT_LOOKUP_GUARD_KEY,
+                    JSON.stringify(guard)
+                );
+            } catch (error) {
+                console.warn(
+                    "Không thể lưu trạng thái bảo vệ tra cứu:",
+                    error
+                );
+            }
+        }
+
+        function getParentLookupWaitSeconds() {
+            const guard = readParentLookupGuard();
+            const remaining = guard.blockedUntil - Date.now();
+            if (remaining <= 0) {
+                if (guard.blockedUntil) {
+                    writeParentLookupGuard({
+                        failures: 0,
+                        blockedUntil: 0
+                    });
+                }
+                return 0;
+            }
+            return Math.ceil(remaining / 1000);
+        }
+
+        function registerLocalParentLookupFailure(retryAfterSeconds = 0) {
+            const guard = readParentLookupGuard();
+            guard.failures += 1;
+
+            if (Number(retryAfterSeconds || 0) > 0) {
+                guard.blockedUntil = Date.now() +
+                    Number(retryAfterSeconds) * 1000;
+            } else if (guard.failures >= 5) {
+                guard.failures = 0;
+                guard.blockedUntil = Date.now() + 30 * 1000;
+            }
+
+            writeParentLookupGuard(guard);
+            return getParentLookupWaitSeconds();
+        }
+
+        function clearParentLookupGuard() {
+            try {
+                sessionStorage.removeItem(PARENT_LOOKUP_GUARD_KEY);
+            } catch (error) {
+                writeParentLookupGuard({
+                    failures: 0,
+                    blockedUntil: 0
+                });
+            }
+        }
+
+        function setParentLookupBusy(isBusy) {
+            window.parentLookupInProgress = Boolean(isBusy);
+            document.querySelectorAll(
+                '[onclick="performParentLookup()"],' +
+                '[onclick="performDirectLookup()"]'
+            ).forEach(button => {
+                button.disabled = Boolean(isBusy);
+            });
+
+            const portalButton = document.getElementById(
+                "parent-lookup-submit-button"
+            );
+            if (portalButton) {
+                portalButton.innerHTML = isBusy
+                    ? '<i class="ph-bold ph-spinner-gap animate-spin mr-2"></i> ĐANG TRA CỨU...'
+                    : 'TRA CỨU NGAY';
+            }
+        }
+
         function requestParentDataFromGoogle(phone) {
             return new Promise((resolve, reject) => {
                 const callbackName = "googleParentCallback_" + Date.now() + "_" +
@@ -4640,9 +4734,19 @@ window.openEditGroupModal = function(id) {
                     if (!response || !response.ok || !response.student) {
                         const message = (response && response.message) ||
                             "Không thể kết nối nguồn dữ liệu.";
+                        const retryAfterSeconds = Number(
+                            (response && response.retryAfterSeconds) || 0
+                        );
                         const error = new Error(message);
-                        error.retryable = Boolean(response && response.retryable) ||
-                            !/không tìm thấy|mã tra cứu không chính xác|thiếu mã tra cứu/i.test(message);
+                        error.retryAfterSeconds = retryAfterSeconds;
+                        error.isLookupFailure =
+                            /mã tra cứu không chính xác|đúng 5 chữ số|quá nhiều lượt nhập sai/i
+                                .test(message);
+                        error.retryable = !retryAfterSeconds && (
+                            Boolean(response && response.retryable) ||
+                            !/không tìm thấy|mã tra cứu không chính xác|thiếu mã tra cứu|quá nhiều lượt nhập sai/i
+                                .test(message)
+                        );
                         reject(error);
                         return;
                     }
@@ -4664,88 +4768,134 @@ window.openEditGroupModal = function(id) {
         }
 
         async function lookupParentFromGoogle(phone) {
+            if (window.parentLookupInProgress) {
+                return showToast(
+                    "Yêu cầu tra cứu đang được xử lý, vui lòng chờ.",
+                    "success"
+                );
+            }
+
+            const waitSeconds = getParentLookupWaitSeconds();
+            if (waitSeconds > 0) {
+                return showToast(
+                    "Bạn đã nhập sai nhiều lần. Vui lòng thử lại sau " +
+                    waitSeconds + " giây.",
+                    "error"
+                );
+            }
+
             phone = String(phone || "").replace(/\D/g, "");
             if (!/^\d{5}$/.test(phone)) {
-                return showToast("Mã tra cứu phải gồm đúng 5 chữ số", "error");
+                const localWait = registerLocalParentLookupFailure();
+                return showToast(
+                    localWait
+                        ? "Bạn đã nhập sai nhiều lần. Vui lòng thử lại sau " +
+                            localWait + " giây."
+                        : "Mã tra cứu phải gồm đúng 5 chữ số",
+                    "error"
+                );
             }
 
+            setParentLookupBusy(true);
             showToast("Đang tải dữ liệu học tập...", "success");
 
-            let response;
-            for (let attempt = 0; attempt < 2; attempt++) {
-                try {
-                    response = await requestParentDataFromGoogle(phone);
-                    break;
-                } catch (error) {
-                    if (!error.retryable || attempt === 1) {
-                        return showToast(
-                            error.message || "Không thể tải dữ liệu học sinh.",
-                            "error"
+            try {
+                let response;
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    try {
+                        response = await requestParentDataFromGoogle(phone);
+                        break;
+                    } catch (error) {
+                        if (!error.retryable || attempt === 1) {
+                            if (error.isLookupFailure) {
+                                const localWait =
+                                    registerLocalParentLookupFailure(
+                                        error.retryAfterSeconds
+                                    );
+                                if (localWait && !error.retryAfterSeconds) {
+                                    return showToast(
+                                        "Bạn đã nhập sai nhiều lần. Vui lòng thử lại sau " +
+                                        localWait + " giây.",
+                                        "error"
+                                    );
+                                }
+                            }
+                            return showToast(
+                                error.message ||
+                                "Không thể tải dữ liệu học sinh.",
+                                "error"
+                            );
+                        }
+
+                        showToast(
+                            "Hệ thống đang có nhiều lượt tra cứu, đang thử lại...",
+                            "success"
                         );
+                        await new Promise(resolve => setTimeout(
+                            resolve,
+                            1200 + Math.floor(Math.random() * 1800)
+                        ));
                     }
-
-                    showToast(
-                        "Hệ thống đang có nhiều lượt tra cứu, đang thử lại...",
-                        "success"
-                    );
-                    await new Promise(resolve => setTimeout(
-                        resolve,
-                        1200 + Math.floor(Math.random() * 1800)
-                    ));
                 }
-            }
 
-            if (!response || !response.student) {
-                return showToast("Không thể tải dữ liệu học sinh.", "error");
-            }
+                if (!response || !response.student) {
+                    return showToast(
+                        "Không thể tải dữ liệu học sinh.",
+                        "error"
+                    );
+                }
 
-            const sourceStudent = response.student;
-            const remoteStudent = {
-                id: "google-" + sourceStudent.studentCode,
-                studentCode: sourceStudent.studentCode,
-                name: sourceStudent.name,
-                lookupCode: "",
-                khoiThi: sourceStudent.khoiThi,
-                tongDiemMucTieu: sourceStudent.tongDiemMucTieu,
-                points: 0,
-                stars: 0,
-                group: "",
-                role: "",
-                talent: "",
-                avatarUrl: "",
-                gender: "",
-                history: []
-            };
-            const index = state.students.findIndex(item =>
-                String(item.studentCode || "") ===
-                String(remoteStudent.studentCode)
-            );
-            if (index >= 0) {
-                state.students[index] = {
-                    ...state.students[index],
-                    ...remoteStudent
+                clearParentLookupGuard();
+                const sourceStudent = response.student;
+                const remoteStudent = {
+                    id: "google-" + sourceStudent.studentCode,
+                    studentCode: sourceStudent.studentCode,
+                    name: sourceStudent.name,
+                    lookupCode: "",
+                    khoiThi: sourceStudent.khoiThi,
+                    tongDiemMucTieu: sourceStudent.tongDiemMucTieu,
+                    points: 0,
+                    stars: 0,
+                    group: "",
+                    role: "",
+                    talent: "",
+                    avatarUrl: "",
+                    gender: "",
+                    history: []
                 };
-            } else {
-                state.students.push(remoteStudent);
-            }
+                const index = state.students.findIndex(item =>
+                    String(item.studentCode || "") ===
+                    String(remoteStudent.studentCode)
+                );
+                if (index >= 0) {
+                    state.students[index] = {
+                        ...state.students[index],
+                        ...remoteStudent
+                    };
+                } else {
+                    state.students.push(remoteStudent);
+                }
 
-            state.scores = (response.scores || []).map(item => ({
-                ...item,
-                studentCode: remoteStudent.studentCode
-            }));
-            state.teacherComments = (response.comments || []).map(item => ({
-                ...item,
-                studentCode: remoteStudent.studentCode
-            }));
-            applyGoogleAttendance(
-                response.attendance || [],
-                false,
-                [remoteStudent.studentCode]
-            );
-            saveData();
-            window.googleSheetMode = true;
-            window.parentSubject = "Toán";
-            showParentView(remoteStudent.id);
+                state.scores = (response.scores || []).map(item => ({
+                    ...item,
+                    studentCode: remoteStudent.studentCode
+                }));
+                state.teacherComments = (response.comments || []).map(item => ({
+                    ...item,
+                    studentCode: remoteStudent.studentCode
+                }));
+                applyGoogleAttendance(
+                    response.attendance || [],
+                    false,
+                    [remoteStudent.studentCode]
+                );
+                saveData();
+                window.googleSheetMode = true;
+                window.parentSubject = "Toán";
+                showParentView(remoteStudent.id);
+            } finally {
+                setParentLookupBusy(false);
+            }
         }
 
         function mergeStudentFromGoogle(student) {
