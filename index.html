@@ -2546,6 +2546,157 @@ window.closeModal = function(id) {
             `;
         }
 
+        function renderSheetConnectionPanel() {
+            const report = window.googleSheetHealthReport || null;
+            const connectionError = String(
+                window.googleSheetHealthError || ""
+            ).trim();
+
+            let statusLabel = "Chưa kiểm tra";
+            let statusClass = "bg-slate-100 text-slate-600 border-slate-200";
+            let statusIcon = "ph-question";
+            let summaryHtml = `
+                <div class="py-8 text-center text-slate-500">
+                    <i class="ph-duotone ph-plugs-connected text-4xl text-slate-300"></i>
+                    <p class="mt-3 font-bold text-slate-700">Chưa kiểm tra nguồn dữ liệu</p>
+                    <p class="mt-1 text-sm">Bấm “Kiểm tra kết nối” để rà soát các sheet và cột cần thiết.</p>
+                </div>
+            `;
+
+            if (connectionError && !report) {
+                statusLabel = "Không kết nối được";
+                statusClass = "bg-red-50 text-red-700 border-red-200";
+                statusIcon = "ph-x-circle";
+                summaryHtml = `
+                    <div class="p-4 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm font-semibold">
+                        ${escapeHtmlText(connectionError)}
+                    </div>
+                `;
+            }
+
+            if (report) {
+                const errorCount = Number(report.errorCount || 0);
+                const warningCount = Number(report.warningCount || 0);
+                const checkedDate = new Date(report.updatedAt || "");
+                const checkedAt = Number.isNaN(checkedDate.getTime())
+                    ? ""
+                    : checkedDate.toLocaleString("vi-VN");
+                const sheets = Array.isArray(report.sheets)
+                    ? report.sheets
+                    : [];
+
+                if (errorCount) {
+                    statusLabel = "Cần sửa";
+                    statusClass = "bg-red-50 text-red-700 border-red-200";
+                    statusIcon = "ph-x-circle";
+                } else if (warningCount) {
+                    statusLabel = "Có cảnh báo";
+                    statusClass = "bg-amber-50 text-amber-700 border-amber-200";
+                    statusIcon = "ph-warning-circle";
+                } else {
+                    statusLabel = "Sẵn sàng";
+                    statusClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                    statusIcon = "ph-check-circle";
+                }
+
+                const sheetsHtml = sheets.map(item => {
+                    const itemStatus = String(item.status || "warning");
+                    const itemClass = itemStatus === "error"
+                        ? "border-red-200 bg-red-50/70"
+                        : itemStatus === "warning"
+                            ? "border-amber-200 bg-amber-50/70"
+                            : "border-emerald-200 bg-emerald-50/70";
+                    const iconClass = itemStatus === "error"
+                        ? "ph-x-circle text-red-500"
+                        : itemStatus === "warning"
+                            ? "ph-warning-circle text-amber-500"
+                            : "ph-check-circle text-emerald-500";
+                    const issues = []
+                        .concat(Array.isArray(item.missingRequired)
+                            ? item.missingRequired
+                            : [])
+                        .concat(Array.isArray(item.warnings)
+                            ? item.warnings
+                            : []);
+                    const issueHtml = issues.length
+                        ? `<ul class="mt-2 space-y-1 text-xs text-slate-600">${issues.map(issue =>
+                            `<li class="flex items-start gap-1.5"><span class="mt-1 w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span><span>${escapeHtmlText(issue)}</span></li>`
+                        ).join("")}</ul>`
+                        : '<p class="mt-2 text-xs font-bold text-emerald-700">Cấu trúc hợp lệ</p>';
+
+                    return `
+                        <div class="p-4 rounded-2xl border ${itemClass}">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <div class="font-black text-slate-800">${escapeHtmlText(item.name || "")}</div>
+                                    <div class="mt-0.5 text-xs text-slate-500">${escapeHtmlText(item.details || "")}</div>
+                                </div>
+                                <i class="ph-fill ${iconClass} text-xl flex-shrink-0"></i>
+                            </div>
+                            ${issueHtml}
+                        </div>
+                    `;
+                }).join("");
+
+                summaryHtml = `
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+                        <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                            <div class="text-[11px] font-black uppercase tracking-wider text-slate-400">Google Sheet</div>
+                            <div class="mt-1 font-black text-slate-800 truncate" title="${escapeHtmlAttr(report.spreadsheetName || "")}">${escapeHtmlText(report.spreadsheetName || "Chưa xác định")}</div>
+                        </div>
+                        <div class="p-4 rounded-2xl bg-blue-50 border border-blue-100">
+                            <div class="text-[11px] font-black uppercase tracking-wider text-blue-400">Học sinh</div>
+                            <div class="mt-1 text-2xl font-black text-blue-700">${Number(report.studentCount || 0)}</div>
+                        </div>
+                        <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                            <div class="text-[11px] font-black uppercase tracking-wider text-slate-400">Kiểm tra lúc</div>
+                            <div class="mt-1 font-bold text-slate-700 text-sm">${escapeHtmlText(checkedAt || "Vừa xong")}</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        ${sheetsHtml}
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100">
+                    <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-6">
+                        <div>
+                            <h3 class="text-xl font-black text-slate-800 flex items-center gap-2">
+                                <i class="ph-fill ph-cloud-check text-blueAccent"></i>
+                                Kết nối Google Sheet
+                            </h3>
+                            <p class="mt-2 text-sm text-slate-500 max-w-2xl">
+                                Kiểm tra file dữ liệu, các sheet bắt buộc và tiêu đề cột trước khi sử dụng.
+                            </p>
+                        </div>
+                        <span class="inline-flex self-start items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black ${statusClass}">
+                            <i class="ph-fill ${statusIcon} text-base"></i>
+                            ${statusLabel}
+                        </span>
+                    </div>
+
+                    ${summaryHtml}
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+                        <button id="sheet-connection-check-button" onclick="checkGoogleSheetConnection()" class="w-full py-3.5 bg-primary text-white font-black rounded-xl shadow-md hover:bg-secondary transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait">
+                            <i class="ph-bold ph-magnifying-glass text-lg"></i>
+                            KIỂM TRA KẾT NỐI
+                        </button>
+                        <button onclick="openConnectedGoogleSheet()" class="w-full py-3.5 bg-blue-50 text-blue-700 border border-blue-200 font-black rounded-xl hover:bg-blue-100 transition-colors flex items-center justify-center gap-2">
+                            <i class="ph-bold ph-table text-lg"></i>
+                            MỞ GOOGLE SHEET
+                        </button>
+                        <button onclick="syncClassFromGoogle()" class="w-full py-3.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-black rounded-xl hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2">
+                            <i class="ph-bold ph-arrows-clockwise text-lg"></i>
+                            TẢI LẠI DỮ LIỆU
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
         function renderViewCaiDat() {
             if (!state.settingsTab) state.settingsTab = 'thong-tin';
 
@@ -2616,20 +2767,23 @@ window.closeModal = function(id) {
                 `;
             } else if (state.settingsTab === 'du-lieu') {
                 contentHtml = `
-                    <div class="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100">
-                        <h3 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><i class="ph-fill ph-cloud-arrow-down text-blueAccent"></i> Lưu trữ và Phục hồi</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div class="p-6 bg-slate-50 border border-slate-200 rounded-2xl">
-                                <h4 class="font-bold text-slate-800 mb-2">Sao lưu dữ liệu</h4>
-                                <p class="text-sm text-slate-500 mb-6">Tải toàn bộ dữ liệu lớp học hiện tại xuống máy tính để đề phòng mất mát.</p>
-                                <button onclick="exportData()" class="w-full py-3.5 bg-blueAccent text-white font-bold rounded-xl shadow-md hover:bg-blue-600 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-download-simple text-lg"></i> TẢI XUỐNG BẢN SAO LƯU</button>
-                            </div>
-                            <div class="p-6 bg-slate-50 border border-slate-200 rounded-2xl">
-                                <h4 class="font-bold text-slate-800 mb-2">Phục hồi dữ liệu</h4>
-                                <p class="text-sm text-slate-500 mb-6">Khôi phục dữ liệu từ file sao lưu đã tải xuống trước đó.</p>
-                                <div class="relative w-full">
-                                    <input type="file" id="import-data-file" accept=".json" class="hidden" onchange="importData(event)">
-                                    <button onclick="document.getElementById('import-data-file').click()" class="w-full py-3.5 bg-white border border-slate-300 text-slate-700 font-bold rounded-xl shadow-sm hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-upload-simple text-lg"></i> CHỌN FILE PHỤC HỒI</button>
+                    <div class="space-y-6">
+                        ${renderSheetConnectionPanel()}
+                        <div class="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100">
+                            <h3 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><i class="ph-fill ph-download-simple text-blueAccent"></i> Sao lưu và Phục hồi</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div class="p-6 bg-slate-50 border border-slate-200 rounded-2xl">
+                                    <h4 class="font-bold text-slate-800 mb-2">Sao lưu dữ liệu trên máy</h4>
+                                    <p class="text-sm text-slate-500 mb-6">Tải dữ liệu cục bộ của lớp xuống máy tính để có thể phục hồi khi cần.</p>
+                                    <button onclick="exportData()" class="w-full py-3.5 bg-blueAccent text-white font-bold rounded-xl shadow-md hover:bg-blue-600 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-download-simple text-lg"></i> TẢI XUỐNG BẢN SAO LƯU</button>
+                                </div>
+                                <div class="p-6 bg-slate-50 border border-slate-200 rounded-2xl">
+                                    <h4 class="font-bold text-slate-800 mb-2">Phục hồi dữ liệu trên máy</h4>
+                                    <p class="text-sm text-slate-500 mb-6">Khôi phục dữ liệu cục bộ từ file sao lưu đã tải xuống trước đó.</p>
+                                    <div class="relative w-full">
+                                        <input type="file" id="import-data-file" accept=".json" class="hidden" onchange="importData(event)">
+                                        <button onclick="document.getElementById('import-data-file').click()" class="w-full py-3.5 bg-white border border-slate-300 text-slate-700 font-bold rounded-xl shadow-sm hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-upload-simple text-lg"></i> CHỌN FILE PHỤC HỒI</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3994,6 +4148,89 @@ window.openEditGroupModal = function(id) {
             rememberGoogleAdminKey(key);
             return key;
         }
+
+        window.checkGoogleSheetConnection = function() {
+            const adminKey = getGoogleAdminKey();
+            if (!adminKey) return;
+
+            const button = document.getElementById("sheet-connection-check-button");
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<i class="ph-bold ph-spinner-gap text-lg animate-spin"></i> ĐANG KIỂM TRA...';
+            }
+
+            const callbackName = "googleConnectionCheckCallback_" +
+                Date.now() + "_" + Math.floor(Math.random() * 10000);
+            const script = document.createElement("script");
+            let finished = false;
+            const timeout = setTimeout(() => finish({
+                ok: false,
+                message: "Google Sheet phản hồi chậm hoặc không thể kết nối."
+            }), 15000);
+
+            function cleanup() {
+                clearTimeout(timeout);
+                delete window[callbackName];
+                script.remove();
+            }
+
+            function finish(response) {
+                if (finished) return;
+                finished = true;
+                cleanup();
+
+                if (!response || !response.ok || !Array.isArray(response.sheets)) {
+                    const message = (response && response.message) ||
+                        "Không thể kiểm tra kết nối Google Sheet.";
+                    if (message === "Mã quản trị không chính xác.") {
+                        clearGoogleAdminKey();
+                    }
+                    window.googleSheetHealthReport = null;
+                    window.googleSheetHealthError = message;
+                    renderLayout();
+                    showToast(message, "error");
+                    return;
+                }
+
+                rememberGoogleAdminKey(adminKey);
+                window.googleSheetHealthError = "";
+                window.googleSheetHealthReport = response;
+                window.googleSpreadsheetUrl = String(
+                    response.spreadsheetUrl ||
+                    window.googleSpreadsheetUrl ||
+                    ""
+                );
+                renderLayout();
+
+                if (Number(response.errorCount || 0)) {
+                    showToast(
+                        "Đã kết nối nhưng cấu trúc Sheet còn lỗi cần sửa.",
+                        "error"
+                    );
+                } else if (Number(response.warningCount || 0)) {
+                    showToast(
+                        "Kết nối thành công. Có một số cảnh báo cần xem lại.",
+                        "success"
+                    );
+                } else {
+                    showToast(
+                        "Google Sheet đã kết nối và cấu trúc hợp lệ!",
+                        "success"
+                    );
+                }
+            }
+
+            window[callbackName] = finish;
+            script.onerror = () => finish({
+                ok: false,
+                message: "Không thể kết nối tới Google Apps Script."
+            });
+            script.src = GOOGLE_SHEET_API_URL +
+                "?mode=connection-check&adminKey=" +
+                encodeURIComponent(adminKey) +
+                "&callback=" + callbackName;
+            document.head.appendChild(script);
+        };
 
         window.syncAttendanceFromGoogle = function() {
             const adminKey = getGoogleAdminKey();
