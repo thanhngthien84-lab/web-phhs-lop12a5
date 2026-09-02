@@ -2908,6 +2908,12 @@ window.closeModal = function(id) {
                                     <input type="text" id="edit-s-student-code" value="${escapeHtmlAttr(s.studentCode || '')}" ${id ? 'readonly' : ''} placeholder="Ví dụ: 0150344890" class="w-full px-5 py-3.5 bg-white border border-slate-300 rounded-xl text-base font-black text-slate-800 focus:border-blueAccent focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm ${id ? 'bg-slate-100 cursor-not-allowed' : ''}">
                                     <p class="mt-2 text-xs text-slate-400 font-medium">Mã này phải giống cột MaHS trong Google Sheet.</p>
                                 </div>
+
+                                <div>
+                                    <label class="block text-sm font-bold text-slate-600 mb-2">Số điện thoại PHHS</label>
+                                    <input type="tel" inputmode="numeric" id="edit-s-parent-phone" value="${escapeHtmlAttr(s.parentPhone || '')}" placeholder="Ví dụ: 0912345678" maxlength="15" class="w-full px-5 py-3.5 bg-white border border-slate-300 rounded-xl text-base font-bold text-slate-800 focus:border-blueAccent focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm">
+                                    <p class="mt-2 text-xs text-slate-400 font-medium">Chỉ dùng để giáo viên liên hệ, không dùng để đăng nhập.</p>
+                                </div>
                                 
                                 <!-- Giới tính & Nhóm thi đua -->
                                 <div class="grid grid-cols-2 gap-5">
@@ -2946,7 +2952,7 @@ window.closeModal = function(id) {
                                 <div class="flex items-center gap-3 mt-1">
                                     <div class="flex items-center gap-1.5 text-[#5468ff] font-black text-sm">
                                         <i class="ph-fill ph-squares-four text-lg"></i>
-                                        <span>Mã tra cứu PHHS: <span class="tracking-wider">${s.parentPhone || '---'}</span></span>
+                                        <span>Mã tra cứu PHHS: <span class="tracking-wider">${s.lookupCode || s.parentPhone || '---'}</span></span>
                                     </div>
                                     <input type="hidden" id="edit-s-code" value="${escapeHtmlAttr(s.code || '')}">
                                 </div>
@@ -3013,7 +3019,7 @@ window.requestStudentSaveToGoogle = function(studentPayload, adminKey) {
                 const message = (response && response.message) ||
                     "Không thể lưu học sinh lên Google Sheet.";
                 if (message === "Mã quản trị không chính xác.") {
-                    window.googleAdminKey = "";
+                    clearGoogleAdminKey();
                 }
                 reject(new Error(message));
                 return;
@@ -3061,6 +3067,9 @@ window.saveStudentEdit = async function() {
     const studentData = {
         name: nameInput,
         studentCode: studentCode,
+        parentPhone: String(
+            document.getElementById("edit-s-parent-phone").value || ""
+        ).replace(/\D/g, ""),
         avatarUrl: document.getElementById("edit-s-avatar").value.trim(),
         gender: document.getElementById("edit-s-gender").value,
         group: document.getElementById("edit-s-group").value,
@@ -3090,8 +3099,9 @@ window.saveStudentEdit = async function() {
                 : "",
             studentCode: studentCode,
             name: nameInput,
+            parentPhone: studentData.parentPhone,
             lookupCode: currentStudent
-                ? String(currentStudent.parentPhone || "").trim()
+                ? String(currentStudent.lookupCode || "").trim()
                 : "",
             khoiThi: currentStudent
                 ? String(currentStudent.khoiThi || "").trim()
@@ -3101,9 +3111,12 @@ window.saveStudentEdit = async function() {
                 : ""
         }, adminKey);
 
-        window.googleAdminKey = adminKey;
+        rememberGoogleAdminKey(adminKey);
         studentData.parentPhone = String(
             response.student.parentPhone || ""
+        ).trim();
+        studentData.lookupCode = String(
+            response.student.lookupCode || ""
         ).trim();
 
         if (currentStudent) {
@@ -3738,7 +3751,13 @@ window.openEditGroupModal = function(id) {
         // API Google Sheets: chỉ trả về dữ liệu của học sinh khớp mã tra cứu.
         const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAOm6rvHIUbC1jq8oCY5yGVLT4y8Wp9J250Yl9lQfK1D1m4zIN7OnHahw3bKzE2nTC/exec";
 
-        window.googleAdminKey = window.googleAdminKey || "";
+        window.googleAdminKey = window.googleAdminKey || (() => {
+            try {
+                return sessionStorage.getItem("chuyen_tau_google_admin_key") || "";
+            } catch (error) {
+                return "";
+            }
+        })();
 
         function updateDocumentTitle() {
             const rawClassName = String(
@@ -3847,7 +3866,7 @@ window.openEditGroupModal = function(id) {
                         const message = (response && response.message) ||
                             "Không thể lưu tên lớp.";
                         if (message === "Mã quản trị không chính xác.") {
-                            window.googleAdminKey = "";
+                            clearGoogleAdminKey();
                         }
                         reject(new Error(message));
                         return;
@@ -3926,11 +3945,37 @@ window.openEditGroupModal = function(id) {
             });
         }
 
+        function rememberGoogleAdminKey(key) {
+            window.googleAdminKey = String(key || "");
+            try {
+                if (window.googleAdminKey) {
+                    sessionStorage.setItem("chuyen_tau_google_admin_key", window.googleAdminKey);
+                } else {
+                    sessionStorage.removeItem("chuyen_tau_google_admin_key");
+                }
+            } catch (error) {
+                console.warn("Không thể lưu phiên quản trị:", error);
+            }
+        }
+
+        function clearGoogleAdminKey() {
+            rememberGoogleAdminKey("");
+        }
+
         function getGoogleAdminKey() {
             if (window.googleAdminKey) return window.googleAdminKey;
-            const key = window.prompt("Nhập mã quản trị GVCN để đồng bộ dữ liệu với Google Sheets:");
+            try {
+                const savedKey = sessionStorage.getItem("chuyen_tau_google_admin_key");
+                if (savedKey) {
+                    window.googleAdminKey = savedKey;
+                    return savedKey;
+                }
+            } catch (error) {
+                console.warn("Không thể đọc phiên quản trị:", error);
+            }
+            const key = window.prompt("Nhập mã quản trị GVCN để kết nối Google Sheets:");
             if (!key) return "";
-            window.googleAdminKey = key;
+            rememberGoogleAdminKey(key);
             return key;
         }
 
@@ -3974,7 +4019,7 @@ window.openEditGroupModal = function(id) {
                 if (!response || !response.ok || !Array.isArray(response.attendance)) {
                     restoreButton();
                     if (response && response.message === "Mã quản trị không chính xác.") {
-                        window.googleAdminKey = "";
+                        clearGoogleAdminKey();
                     }
                     showToast(
                         (response && response.message) || "Không thể đồng bộ dữ liệu điểm danh.",
@@ -3983,7 +4028,7 @@ window.openEditGroupModal = function(id) {
                     return;
                 }
 
-                window.googleAdminKey = adminKey;
+                rememberGoogleAdminKey(adminKey);
                 const studentCodes = Array.isArray(response.studentCodes)
                     ? response.studentCodes
                     : [];
@@ -4041,7 +4086,7 @@ window.openEditGroupModal = function(id) {
                         const wrongAdminKey = message === "Mã quản trị không chính xác.";
 
                         if (wrongAdminKey) {
-                            window.googleAdminKey = "";
+                            clearGoogleAdminKey();
                         }
 
                         const error = new Error(message);
@@ -4196,7 +4241,7 @@ window.openEditGroupModal = function(id) {
                     message: "Kết nối tới cổng tra cứu bị gián đoạn."
                 });
                 script.src = GOOGLE_SHEET_API_URL +
-                    "?phone=" + encodeURIComponent(phone) +
+                    "?lookupCode=" + encodeURIComponent(phone) +
                     "&callback=" + callbackName;
                 document.head.appendChild(script);
             });
@@ -4243,7 +4288,7 @@ window.openEditGroupModal = function(id) {
                 id: "google-" + sourceStudent.studentCode,
                 studentCode: sourceStudent.studentCode,
                 name: sourceStudent.name,
-                parentPhone: sourceStudent.parentPhone,
+                lookupCode: "",
                 khoiThi: sourceStudent.khoiThi,
                 tongDiemMucTieu: sourceStudent.tongDiemMucTieu,
                 points: 0,
@@ -4333,18 +4378,19 @@ window.openEditGroupModal = function(id) {
                     const message = (response && response.message) ||
                         "Không thể tạo mã tra cứu.";
                     if (message === "Mã quản trị không chính xác.") {
-                        window.googleAdminKey = "";
+                        clearGoogleAdminKey();
                     }
                     showToast(message, "error");
                     return;
                 }
 
-                window.googleAdminKey = adminKey;
+                rememberGoogleAdminKey(adminKey);
                 state.students = response.students.map(student => ({
                     id: "google-" + student.studentCode,
                     studentCode: student.studentCode,
                     name: student.name,
                     parentPhone: student.parentPhone,
+                    lookupCode: student.lookupCode,
                     khoiThi: student.khoiThi,
                     tongDiemMucTieu: student.tongDiemMucTieu,
                     points: 0,
@@ -4380,8 +4426,8 @@ window.openEditGroupModal = function(id) {
             document.head.appendChild(script);
         };
 
-        window.syncClassFromGoogle = function() {
-            const adminKey = window.prompt("Nhập mã quản trị GVCN để đồng bộ danh sách:");
+        window.syncClassFromGoogle = function(options = {}) {
+            const adminKey = getGoogleAdminKey();
             if (!adminKey) return;
 
             showToast("Đang đồng bộ danh sách học sinh...", "success");
@@ -4397,13 +4443,13 @@ window.openEditGroupModal = function(id) {
                 }
                 state.students = response.students.map((student, index) => ({
                     id: "google-" + student.studentCode,
-                    studentCode: student.studentCode, name: student.name, parentPhone: student.parentPhone,
+                    studentCode: student.studentCode, name: student.name, parentPhone: student.parentPhone, lookupCode: student.lookupCode,
                     khoiThi: student.khoiThi, tongDiemMucTieu: student.tongDiemMucTieu,
                     points: 0, stars: 0, group: "", role: "", talent: "", avatarUrl: "", gender: "", history: []
                 }));
                 state.scores = [];
                 state.teacherComments = [];
-                window.googleAdminKey = adminKey;
+                rememberGoogleAdminKey(adminKey);
                 applyGoogleAttendance(
                     response.attendance || [],
                     true,
@@ -6896,6 +6942,12 @@ window.startApp = function() {
                         "Không thể tải tên lớp cho cổng PHHS:",
                         error
                     ));
+            } else {
+                window.setTimeout(() => {
+                    if (typeof window.syncClassFromGoogle === "function") {
+                        window.syncClassFromGoogle({ automatic: true });
+                    }
+                }, 100);
             }
         };
 
