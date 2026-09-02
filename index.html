@@ -2938,7 +2938,7 @@ window.closeModal = function(id) {
                                 <div class="flex items-center gap-3 mt-1">
                                     <div class="flex items-center gap-1.5 text-[#5468ff] font-black text-sm">
                                         <i class="ph-fill ph-squares-four text-lg"></i>
-                                        <span>SĐT PHHS dùng để tra cứu: <span class="tracking-wider">${s.parentPhone || '---'}</span></span>
+                                        <span>Mã tra cứu PHHS: <span class="tracking-wider">${s.parentPhone || '---'}</span></span>
                                     </div>
                                     <input type="hidden" id="edit-s-code" value="${escapeHtmlAttr(s.code || '')}">
                                 </div>
@@ -3239,13 +3239,15 @@ window.openEditGroupModal = function(id) {
 
   const idIndex = headers.indexOf("mahs");
   const nameIndex = headers.indexOf("hoten");
-  const phoneIndex = headers.indexOf("sdt_phhs");
+  const phoneIndex = headers.findIndex(header => [
+    "matracuu", "mãtracứu", "ma_tracuu", "pinphhs", "sdt_phhs"
+  ].includes(header));
   const blockIndex = headers.indexOf("khốithi");
   const goalIndex = headers.indexOf("tổngđiểmmụctiêu");
 
   if (idIndex === -1 || nameIndex === -1 || phoneIndex === -1) {
     return showToast(
-      "Sheet HOC_SINH phải có cột: MaHS, HoTen, SDT_PHHS",
+      "Sheet HOC_SINH phải có cột: MaHS, HoTen, MaTraCuu",
       "error"
     );
   }
@@ -3267,7 +3269,14 @@ window.openEditGroupModal = function(id) {
     if (!studentCode && !name && !phone) continue;
 
     if (!studentCode || !name || !phone) {
-      return showToast(`Dòng ${i + 1}: thiếu MaHS, HoTen hoặc SDT_PHHS`, "error");
+      return showToast(`Dòng ${i + 1}: thiếu MaHS, HoTen hoặc MaTraCuu`, "error");
+    }
+
+    if (!/^\d{5}$/.test(phone)) {
+      return showToast(
+        `Dòng ${i + 1}: mã tra cứu phải gồm đúng 5 chữ số`,
+        "error"
+      );
     }
 
     if (usedIds.has(studentCode)) {
@@ -3275,7 +3284,7 @@ window.openEditGroupModal = function(id) {
     }
 
     if (usedPhones.has(phone)) {
-      return showToast(`Dòng ${i + 1}: SĐT PHHS "${phone}" bị trùng`, "error");
+      return showToast(`Dòng ${i + 1}: Mã tra cứu "${phone}" bị trùng`, "error");
     }
 
     usedIds.add(studentCode);
@@ -3598,8 +3607,8 @@ window.openEditGroupModal = function(id) {
                         ${closeButton}
                         <div class="w-24 h-24 bg-gradient-to-br from-orange-100 to-amber-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner"><i class="ph-fill ph-student text-5xl text-orange-500"></i></div>
                         <h3 class="font-black text-slate-800 text-3xl mb-2 tracking-tight">Cổng Phụ Huynh</h3>
-                        <p class="text-sm text-slate-500 mb-10 font-medium">Nhập số điện thoại của phụ huynh để xem hồ sơ học tập</p>
-                        <input type="tel" inputmode="numeric" id="lookup-code-input" placeholder="VD: 0912345678" class="w-full px-5 py-5 bg-slate-50 border-2 border-slate-200 rounded-2xl text-2xl font-black text-center tracking-[0.12em] text-slate-800 focus:border-orange-400 outline-none mb-8 shadow-inner transition-colors" maxlength="15" onkeypress="if(event.key === 'Enter') performParentLookup()">
+                        <p class="text-sm text-slate-500 mb-10 font-medium">Nhập mã tra cứu để xem hồ sơ học tập</p>
+                        <input type="tel" inputmode="numeric" id="lookup-code-input" placeholder="VD: 12345" class="w-full px-5 py-5 bg-slate-50 border-2 border-slate-200 rounded-2xl text-2xl font-black text-center tracking-[0.12em] text-slate-800 focus:border-orange-400 outline-none mb-8 shadow-inner transition-colors" maxlength="5" autocomplete="off" onkeypress="if(event.key === 'Enter') performParentLookup()">
                         <button onclick="performParentLookup()" class="w-full py-4.5 bg-gradient-to-r from-orange-400 to-red-500 text-white font-black rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all text-lg tracking-wider">TRA CỨU NGAY</button>
                     </div>
                 </div>
@@ -3607,7 +3616,7 @@ window.openEditGroupModal = function(id) {
             setTimeout(() => document.getElementById('lookup-code-input').focus(), 100);
         }
 
-        // API Google Sheets: chỉ trả về dữ liệu của học sinh khớp số điện thoại.
+        // API Google Sheets: chỉ trả về dữ liệu của học sinh khớp mã tra cứu.
         const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAOm6rvHIUbC1jq8oCY5yGVLT4y8Wp9J250Yl9lQfK1D1m4zIN7OnHahw3bKzE2nTC/exec";
 
         window.googleAdminKey = window.googleAdminKey || "";
@@ -4053,7 +4062,7 @@ window.openEditGroupModal = function(id) {
                             "Không thể kết nối nguồn dữ liệu.";
                         const error = new Error(message);
                         error.retryable = Boolean(response && response.retryable) ||
-                            !/không tìm thấy|thiếu số điện thoại/i.test(message);
+                            !/không tìm thấy|mã tra cứu không chính xác|thiếu mã tra cứu/i.test(message);
                         reject(error);
                         return;
                     }
@@ -4076,8 +4085,8 @@ window.openEditGroupModal = function(id) {
 
         async function lookupParentFromGoogle(phone) {
             phone = String(phone || "").replace(/\D/g, "");
-            if (!phone) {
-                return showToast("Vui lòng nhập số điện thoại PHHS", "error");
+            if (!/^\d{5}$/.test(phone)) {
+                return showToast("Mã tra cứu phải gồm đúng 5 chữ số", "error");
             }
 
             showToast("Đang tải dữ liệu học tập...", "success");
@@ -6374,9 +6383,9 @@ window.playBellSound = function(idx = 0) {
 
                            <!-- Nút tra cứu mã (Đã nâng cấp thành ô nhập trực tiếp) -->
                             <div class="bg-orange-50 p-4 rounded-[1.5rem] border border-orange-100">
-                                <p class="text-[11px] font-bold text-orange-800 text-center mb-3">Nhập số điện thoại PHHS để xem điểm & nề nếp</p>
+                                <p class="text-[11px] font-bold text-orange-800 text-center mb-3">Nhập mã tra cứu 5 chữ số để xem điểm & nề nếp</p>
                                 <div class="flex gap-2">
-                                    <input type="tel" inputmode="numeric" id="direct-lookup-code" placeholder="Ví dụ: 0912345678" class="w-full px-4 py-3 bg-white border border-orange-200 rounded-xl text-center text-xl font-black tracking-[0.12em] text-orange-600 outline-none focus:border-orange-500 shadow-inner transition-colors" maxlength="15" onkeypress="if(event.key === 'Enter') performDirectLookup()">
+                                    <input type="tel" inputmode="numeric" id="direct-lookup-code" placeholder="Ví dụ: 12345" class="w-full px-4 py-3 bg-white border border-orange-200 rounded-xl text-center text-xl font-black tracking-[0.12em] text-orange-600 outline-none focus:border-orange-500 shadow-inner transition-colors" maxlength="5" autocomplete="off" onkeypress="if(event.key === 'Enter') performDirectLookup()">
                                     <button onclick="performDirectLookup()" class="px-6 bg-gradient-to-r from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 text-white rounded-xl shadow-md transition-all flex items-center justify-center transform hover:-translate-y-0.5" title="Tra cứu">
                                         <i class="ph-bold ph-magnifying-glass text-2xl"></i>
                                     </button>
@@ -6548,9 +6557,9 @@ window.renderLoginScreen = function() {
                             </div>
 
                             <div class="bg-orange-50/50 rounded-2xl p-6 border border-orange-100 flex flex-col items-center relative overflow-hidden group w-full mb-4">
-                                <div class="text-xs font-bold text-orange-600 mb-4 text-center">Nhập số điện thoại PHHS để xem điểm & nề nếp</div>
+                                <div class="text-xs font-bold text-orange-600 mb-4 text-center">Nhập mã tra cứu 5 chữ số để xem điểm & nề nếp</div>
                                 <div class="flex gap-3 w-full">
-                                    <input type="tel" inputmode="numeric" id="direct-lookup-code" placeholder="VD: 0912345678" class="flex-1 px-4 py-3 bg-white border border-orange-200 rounded-xl text-center font-black text-slate-800 tracking-[0.12em] outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition-all shadow-sm" maxlength="15" onkeypress="if(event.key === 'Enter') performDirectLookup()">
+                                    <input type="tel" inputmode="numeric" id="direct-lookup-code" placeholder="VD: 12345" class="flex-1 px-4 py-3 bg-white border border-orange-200 rounded-xl text-center font-black text-slate-800 tracking-[0.12em] outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition-all shadow-sm" maxlength="5" autocomplete="off" onkeypress="if(event.key === 'Enter') performDirectLookup()">
                                     <button onclick="performDirectLookup()" class="w-14 h-auto bg-[#f97316] text-white rounded-xl flex items-center justify-center shadow-md hover:bg-[#ea580c] transition-all"><i class="ph-bold ph-magnifying-glass text-xl"></i></button>
                                 </div>
                             </div>

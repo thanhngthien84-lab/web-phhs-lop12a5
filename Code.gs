@@ -104,9 +104,9 @@ function doGet(e) {
     }
 
     const phone = normalizePhone(parameters.phone || "");
-    if (!phone) {
+    if (!/^\d{5}$/.test(phone)) {
       return output(
-        { ok: false, message: "Thiếu số điện thoại PHHS." },
+        { ok: false, message: "Mã tra cứu phải gồm đúng 5 chữ số." },
         callback
       );
     }
@@ -114,7 +114,7 @@ function doGet(e) {
     const data = getStudentData(phone);
     if (!data) {
       return output(
-        { ok: false, message: "Không tìm thấy học sinh có số điện thoại này." },
+        { ok: false, message: "Mã tra cứu không chính xác." },
         callback
       );
     }
@@ -226,7 +226,7 @@ function getClassList() {
   const headers = values[0].map(normalizeHeader);
   const idColumn = requireColumn(headers, "mahs", "Mã HS");
   const nameColumn = requireColumn(headers, "hoten", "Họ tên");
-  const phoneColumn = headers.indexOf("sdtphhs");
+  const phoneColumn = findFirstColumn(headers, ["matracuu", "pinphhs", "sdtphhs"]);
   const blockColumn = headers.indexOf("khoithi");
   const goalColumn = headers.indexOf("tongdiemmuctieu");
 
@@ -253,7 +253,11 @@ function getStudentData(phone) {
   const studentHeaders = studentValues[0].map(normalizeHeader);
   const idColumn = requireColumn(studentHeaders, "mahs", "Mã HS");
   const nameColumn = requireColumn(studentHeaders, "hoten", "Họ tên");
-  const phoneColumn = requireColumn(studentHeaders, "sdtphhs", "SĐT PHHS");
+  const phoneColumn = requireAnyColumn(
+    studentHeaders,
+    ["matracuu", "pinphhs", "sdtphhs"],
+    "MaTraCuu"
+  );
   const blockColumn = studentHeaders.indexOf("khoithi");
   const goalColumn = studentHeaders.indexOf("tongdiemmuctieu");
 
@@ -384,6 +388,22 @@ function readComments(ss, studentCode) {
     }))
     .filter(item => item.text)
     .sort((a, b) => b.weekNumber - a.weekNumber);
+}
+
+function findFirstColumn(headers, normalizedNames) {
+  for (let index = 0; index < normalizedNames.length; index++) {
+    const column = headers.indexOf(normalizedNames[index]);
+    if (column >= 0) return column;
+  }
+  return -1;
+}
+
+function requireAnyColumn(headers, normalizedNames, displayName) {
+  const column = findFirstColumn(headers, normalizedNames);
+  if (column < 0) {
+    throw new Error('Sheet "HOC_SINH" thiếu cột "' + displayName + '".');
+  }
+  return column;
 }
 
 function requireColumn(headers, normalizedName, displayName) {
