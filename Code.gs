@@ -44,6 +44,22 @@ function doGet(e) {
       );
     }
 
+    if (mode === "lookup-codes-generate") {
+      assertAdminKey(parameters.adminKey);
+
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const result = generateMissingLookupCodes(ss);
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          generatedCount: result.generatedCount,
+          students: getClassList()
+        },
+        callback
+      );
+    }
+
     if (mode === "class") {
       assertAdminKey(parameters.adminKey);
 
@@ -210,6 +226,82 @@ function savePublicSettings(ss, classNameValue) {
     }
 
     return { className: className };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function generateRandomLookupCode(usedCodes) {
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const code = String(Math.floor(Math.random() * 100000))
+      .padStart(5, "0");
+    if (!usedCodes.has(code)) return code;
+  }
+  throw new Error("Không thể tạo mã tra cứu duy nhất. Vui lòng thử lại.");
+}
+
+function generateMissingLookupCodes(ss) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+
+  try {
+    const sheet = ss.getSheetByName("HOC_SINH");
+    if (!sheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return { generatedCount: 0 };
+    }
+
+    let lastColumn = Math.max(sheet.getLastColumn(), 1);
+    let headers = sheet.getRange(1, 1, 1, lastColumn)
+      .getDisplayValues()[0]
+      .map(normalizeHeader);
+    const idColumn = requireColumn(headers, "mahs", "Mã HS");
+    const nameColumn = requireColumn(headers, "hoten", "Họ tên");
+    let lookupColumn = findFirstColumn(
+      headers,
+      ["matracuu", "pinphhs", "sdtphhs"]
+    );
+
+    if (lookupColumn < 0) {
+      lookupColumn = lastColumn;
+      lastColumn += 1;
+      sheet.getRange(1, lookupColumn + 1).setValue("MaTraCuu");
+    }
+
+    const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn)
+      .getDisplayValues();
+    const usedCodes = new Set();
+    const outputCodes = [];
+    let generatedCount = 0;
+
+    rows.forEach(row => {
+      const hasStudent = String(row[idColumn] || "").trim() ||
+        String(row[nameColumn] || "").trim();
+      let code = normalizePhone(row[lookupColumn] || "");
+
+      if (!hasStudent) {
+        outputCodes.push([code]);
+        return;
+      }
+
+      const isValidUnique = /^\d{5}$/.test(code) && !usedCodes.has(code);
+      if (!isValidUnique) {
+        code = generateRandomLookupCode(usedCodes);
+        generatedCount += 1;
+      }
+
+      usedCodes.add(code);
+      outputCodes.push([code]);
+    });
+
+    const targetRange = sheet.getRange(2, lookupColumn + 1, outputCodes.length, 1);
+    targetRange.setNumberFormat("@");
+    targetRange.setValues(outputCodes);
+    SpreadsheetApp.flush();
+
+    return { generatedCount: generatedCount };
   } finally {
     lock.releaseLock();
   }
