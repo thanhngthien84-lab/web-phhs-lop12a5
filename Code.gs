@@ -44,6 +44,30 @@ function doGet(e) {
       );
     }
 
+    if (mode === "student-save") {
+      assertAdminKey(parameters.adminKey);
+
+      let student;
+      try {
+        student = JSON.parse(String(parameters.student || "{}"));
+      } catch (error) {
+        throw new Error("Dữ liệu học sinh không hợp lệ.");
+      }
+
+      const savedStudent = saveStudentRecord(
+        SpreadsheetApp.getActiveSpreadsheet(),
+        student
+      );
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          student: savedStudent
+        },
+        callback
+      );
+    }
+
     if (mode === "lookup-codes-generate") {
       assertAdminKey(parameters.adminKey);
 
@@ -119,15 +143,17 @@ function doGet(e) {
       );
     }
 
-    const phone = normalizePhone(parameters.phone || "");
-    if (!/^\d{5}$/.test(phone)) {
+    const lookupCode = normalizePhone(
+      parameters.lookupCode || parameters.phone || ""
+    );
+    if (!/^\d{5}$/.test(lookupCode)) {
       return output(
         { ok: false, message: "Mã tra cứu phải gồm đúng 5 chữ số." },
         callback
       );
     }
 
-    const data = getStudentData(phone);
+    const data = getStudentData(lookupCode);
     if (!data) {
       return output(
         { ok: false, message: "Mã tra cứu không chính xác." },
@@ -231,6 +257,102 @@ function savePublicSettings(ss, classNameValue) {
   }
 }
 
+function normalizeStudentCode(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^'+/, "")
+    .replace(/\s+/g, "");
+}
+
+function ensureSheetColumn(sheet, headers, aliases, headerName) {
+  let column = findFirstColumn(headers, aliases);
+  if (column >= 0) return column;
+  column = headers.length;
+  sheet.getRange(1, column + 1).setValue(headerName);
+  headers.push(normalizeHeader(headerName));
+  return column;
+}
+
+function saveStudentRecord(ss, input) {
+  const studentCode = normalizeStudentCode(input && input.studentCode);
+  const originalStudentCode = normalizeStudentCode(input && input.originalStudentCode);
+  const name = String((input && input.name) || "").trim();
+  const parentPhone = normalizePhone(input && input.parentPhone);
+  const isNew = Boolean(input && input.isNew);
+
+  if (!studentCode) throw new Error("Mã học sinh không được để trống.");
+  if (!name) throw new Error("Họ tên học sinh không được để trống.");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = ss.getSheetByName("HOC_SINH");
+    if (!sheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
+
+    const values = sheet.getDataRange().getDisplayValues();
+    const headers = values[0].map(normalizeHeader);
+    const idColumn = requireColumn(headers, "mahs", "Mã HS");
+    const nameColumn = requireColumn(headers, "hoten", "Họ tên");
+    const phoneColumn = ensureSheetColumn(sheet, headers, ["sdtphhs"], "SDT_PHHS");
+    const lookupColumn = ensureSheetColumn(sheet, headers, ["matracuu", "pinphhs"], "MaTraCuu");
+    const blockColumn = headers.indexOf("khoithi");
+    const goalColumn = headers.indexOf("tongdiemmuctieu");
+    let targetRow = 0;
+
+    for (let row = 1; row < values.length; row++) {
+      const rowCode = normalizeStudentCode(values[row][idColumn]);
+      if (rowCode === (isNew ? studentCode : originalStudentCode)) {
+        targetRow = row + 1;
+        break;
+      }
+    }
+
+    if (isNew && targetRow) throw new Error("Mã học sinh này đã tồn tại trên Google Sheet.");
+    if (!isNew && !targetRow) throw new Error("Không tìm thấy học sinh cần cập nhật trên Google Sheet.");
+    if (!targetRow) targetRow = Math.max(sheet.getLastRow() + 1, 2);
+
+    const usedCodes = new Set();
+    if (sheet.getLastRow() >= 2) {
+      sheet.getRange(2, lookupColumn + 1, sheet.getLastRow() - 1, 1)
+        .getDisplayValues()
+        .forEach((row, index) => {
+          if (index + 2 === targetRow) return;
+          const code = normalizePhone(row[0]);
+          if (/^\d{5}$/.test(code)) usedCodes.add(code);
+        });
+    }
+
+    let lookupCode = normalizePhone(input && input.lookupCode);
+    if (!/^\d{5}$/.test(lookupCode) || usedCodes.has(lookupCode)) {
+      lookupCode = generateRandomLookupCode(usedCodes);
+    }
+
+    sheet.getRange(targetRow, idColumn + 1).setNumberFormat("@").setValue(studentCode);
+    sheet.getRange(targetRow, nameColumn + 1).setValue(name);
+    sheet.getRange(targetRow, phoneColumn + 1).setNumberFormat("@").setValue(parentPhone);
+    sheet.getRange(targetRow, lookupColumn + 1).setNumberFormat("@").setValue(lookupCode);
+
+    if (blockColumn >= 0 && input.khoiThi !== undefined) {
+      sheet.getRange(targetRow, blockColumn + 1).setValue(String(input.khoiThi || "").trim());
+    }
+    if (goalColumn >= 0 && input.tongDiemMucTieu !== undefined) {
+      sheet.getRange(targetRow, goalColumn + 1).setValue(String(input.tongDiemMucTieu || "").trim());
+    }
+
+    SpreadsheetApp.flush();
+    return {
+      studentCode: studentCode,
+      name: name,
+      parentPhone: parentPhone,
+      lookupCode: lookupCode,
+      khoiThi: blockColumn >= 0 ? sheet.getRange(targetRow, blockColumn + 1).getDisplayValue() : "",
+      tongDiemMucTieu: goalColumn >= 0 ? sheet.getRange(targetRow, goalColumn + 1).getDisplayValue() : ""
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function generateRandomLookupCode(usedCodes) {
   for (let attempt = 0; attempt < 1000; attempt++) {
     const code = String(Math.floor(Math.random() * 100000))
@@ -243,47 +365,37 @@ function generateRandomLookupCode(usedCodes) {
 function generateMissingLookupCodes(ss) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
-
   try {
     const sheet = ss.getSheetByName("HOC_SINH");
     if (!sheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
 
     const lastRow = sheet.getLastRow();
-    if (lastRow < 2) {
-      return { generatedCount: 0 };
-    }
+    if (lastRow < 2) return { generatedCount: 0 };
 
-    let lastColumn = Math.max(sheet.getLastColumn(), 1);
-    let headers = sheet.getRange(1, 1, 1, lastColumn)
-      .getDisplayValues()[0]
-      .map(normalizeHeader);
+    const initialLastColumn = Math.max(sheet.getLastColumn(), 1);
+    const headers = sheet.getRange(1, 1, 1, initialLastColumn)
+      .getDisplayValues()[0].map(normalizeHeader);
     const idColumn = requireColumn(headers, "mahs", "Mã HS");
     const nameColumn = requireColumn(headers, "hoten", "Họ tên");
-    let lookupColumn = findFirstColumn(
-      headers,
-      ["matracuu", "pinphhs", "sdtphhs"]
-    );
-
-    if (lookupColumn < 0) {
-      lookupColumn = lastColumn;
-      lastColumn += 1;
-      sheet.getRange(1, lookupColumn + 1).setValue("MaTraCuu");
-    }
-
-    const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn)
-      .getDisplayValues();
+    const phoneColumn = findFirstColumn(headers, ["sdtphhs"]);
+    const lookupColumn = ensureSheetColumn(sheet, headers, ["matracuu", "pinphhs"], "MaTraCuu");
+    const lastColumn = Math.max(sheet.getLastColumn(), lookupColumn + 1);
+    const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
     const usedCodes = new Set();
     const outputCodes = [];
     let generatedCount = 0;
 
     rows.forEach(row => {
-      const hasStudent = String(row[idColumn] || "").trim() ||
-        String(row[nameColumn] || "").trim();
+      const hasStudent = String(row[idColumn] || "").trim() || String(row[nameColumn] || "").trim();
       let code = normalizePhone(row[lookupColumn] || "");
-
       if (!hasStudent) {
         outputCodes.push([code]);
         return;
+      }
+
+      if (!/^\d{5}$/.test(code) && phoneColumn >= 0) {
+        const legacyCode = normalizePhone(row[phoneColumn] || "");
+        if (/^\d{5}$/.test(legacyCode)) code = legacyCode;
       }
 
       const isValidUnique = /^\d{5}$/.test(code) && !usedCodes.has(code);
@@ -291,7 +403,6 @@ function generateMissingLookupCodes(ss) {
         code = generateRandomLookupCode(usedCodes);
         generatedCount += 1;
       }
-
       usedCodes.add(code);
       outputCodes.push([code]);
     });
@@ -300,7 +411,6 @@ function generateMissingLookupCodes(ss) {
     targetRange.setNumberFormat("@");
     targetRange.setValues(outputCodes);
     SpreadsheetApp.flush();
-
     return { generatedCount: generatedCount };
   } finally {
     lock.releaseLock();
@@ -318,23 +428,25 @@ function getClassList() {
   const headers = values[0].map(normalizeHeader);
   const idColumn = requireColumn(headers, "mahs", "Mã HS");
   const nameColumn = requireColumn(headers, "hoten", "Họ tên");
-  const phoneColumn = findFirstColumn(headers, ["matracuu", "pinphhs", "sdtphhs"]);
+  const phoneColumn = findFirstColumn(headers, ["sdtphhs"]);
+  const lookupColumn = findFirstColumn(headers, ["matracuu", "pinphhs"]);
+  const legacyLookupColumn = lookupColumn >= 0 ? lookupColumn : phoneColumn;
   const blockColumn = headers.indexOf("khoithi");
   const goalColumn = headers.indexOf("tongdiemmuctieu");
 
-  return values
-    .slice(1)
+  return values.slice(1)
     .filter(row => String(row[idColumn] || "").trim() || String(row[nameColumn] || "").trim())
     .map(row => ({
       studentCode: String(row[idColumn] || "").trim(),
       name: String(row[nameColumn] || "").trim(),
       parentPhone: phoneColumn >= 0 ? String(row[phoneColumn] || "").trim() : "",
+      lookupCode: legacyLookupColumn >= 0 ? String(row[legacyLookupColumn] || "").trim() : "",
       khoiThi: blockColumn >= 0 ? String(row[blockColumn] || "").trim() : "",
       tongDiemMucTieu: goalColumn >= 0 ? String(row[goalColumn] || "").trim() : ""
     }));
 }
 
-function getStudentData(phone) {
+function getStudentData(lookupCode) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const studentSheet = ss.getSheetByName("HOC_SINH");
   if (!studentSheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
@@ -345,28 +457,22 @@ function getStudentData(phone) {
   const studentHeaders = studentValues[0].map(normalizeHeader);
   const idColumn = requireColumn(studentHeaders, "mahs", "Mã HS");
   const nameColumn = requireColumn(studentHeaders, "hoten", "Họ tên");
-  const phoneColumn = requireAnyColumn(
-    studentHeaders,
-    ["matracuu", "pinphhs", "sdtphhs"],
-    "MaTraCuu"
-  );
+  const phoneColumn = findFirstColumn(studentHeaders, ["sdtphhs"]);
+  const dedicatedLookupColumn = findFirstColumn(studentHeaders, ["matracuu", "pinphhs"]);
+  const lookupColumn = dedicatedLookupColumn >= 0 ? dedicatedLookupColumn : phoneColumn;
+  if (lookupColumn < 0) throw new Error('Sheet "HOC_SINH" thiếu cột "MaTraCuu".');
+
   const blockColumn = studentHeaders.indexOf("khoithi");
   const goalColumn = studentHeaders.indexOf("tongdiemmuctieu");
-
-  const studentRow = studentValues
-    .slice(1)
-    .find(row => normalizePhone(row[phoneColumn]) === phone);
-
+  const studentRow = studentValues.slice(1)
+    .find(row => normalizePhone(row[lookupColumn]) === lookupCode);
   if (!studentRow) return null;
 
   const student = {
     studentCode: String(studentRow[idColumn] || "").trim(),
     name: String(studentRow[nameColumn] || "").trim(),
-    parentPhone: String(studentRow[phoneColumn] || "").trim(),
     khoiThi: blockColumn >= 0 ? String(studentRow[blockColumn] || "").trim() : "",
-    tongDiemMucTieu: goalColumn >= 0
-      ? String(studentRow[goalColumn] || "").trim()
-      : ""
+    tongDiemMucTieu: goalColumn >= 0 ? String(studentRow[goalColumn] || "").trim() : ""
   };
 
   return {
