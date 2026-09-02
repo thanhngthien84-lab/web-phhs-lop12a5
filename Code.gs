@@ -13,6 +13,27 @@ function doGet(e) {
   const mode = String(parameters.mode || "student").trim().toLowerCase();
 
   try {
+    if (mode === "connection-check") {
+      assertAdminKey(parameters.adminKey);
+
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const report = inspectSpreadsheetSetup(ss);
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          spreadsheetName: ss.getName(),
+          spreadsheetUrl: ss.getUrl(),
+          ready: report.ready,
+          errorCount: report.errorCount,
+          warningCount: report.warningCount,
+          studentCount: report.studentCount,
+          sheets: report.sheets
+        },
+        callback
+      );
+    }
+
     if (mode === "public-settings") {
       const settings = readPublicSettings(
         SpreadsheetApp.getActiveSpreadsheet()
@@ -178,6 +199,341 @@ function doGet(e) {
       callback
     );
   }
+}
+
+function createSheetCheck(
+  name,
+  required,
+  exists,
+  missingRequired,
+  warnings,
+  details,
+  rowCount
+) {
+  const requiredProblems = missingRequired || [];
+  const warningItems = warnings || [];
+  let status = "ready";
+
+  if (!exists) {
+    status = required ? "error" : "warning";
+  } else if (requiredProblems.length) {
+    status = "error";
+  } else if (warningItems.length) {
+    status = "warning";
+  }
+
+  return {
+    name: name,
+    required: Boolean(required),
+    exists: Boolean(exists),
+    status: status,
+    missingRequired: requiredProblems,
+    warnings: warningItems,
+    details: details || "",
+    rowCount: Number(rowCount || 0)
+  };
+}
+
+function inspectSpreadsheetSetup(ss) {
+  const sheets = [
+    inspectStudentSheetSetup(ss),
+    inspectScoreSheetSetup(ss),
+    inspectCommentSheetSetup(ss),
+    inspectAttendanceSheetSetup(ss),
+    inspectSettingsSheetSetup(ss)
+  ];
+  const studentSheet = sheets[0];
+  const errorCount = sheets.filter(item => item.status === "error").length;
+  const warningCount = sheets.filter(item => item.status === "warning").length;
+
+  return {
+    ready: errorCount === 0,
+    errorCount: errorCount,
+    warningCount: warningCount,
+    studentCount: studentSheet.rowCount || 0,
+    sheets: sheets
+  };
+}
+
+function inspectStudentSheetSetup(ss) {
+  const name = "HOC_SINH";
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return createSheetCheck(
+      name,
+      true,
+      false,
+      ["Thiếu sheet HOC_SINH"],
+      [],
+      "Danh sách học sinh và mã tra cứu",
+      0
+    );
+  }
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const headers = (values[0] || []).map(normalizeHeader);
+  const requiredColumns = [
+    { label: "MaHS", aliases: ["mahs"] },
+    { label: "HoTen", aliases: ["hoten"] },
+    {
+      label: "Số điện thoại PHHS",
+      aliases: ["sdtphhs", "sodienthoaiphhs"]
+    },
+    { label: "MaTraCuu", aliases: ["matracuu", "pinphhs"] }
+  ];
+  const recommendedColumns = [
+    { label: "Khối thi", aliases: ["khoithi"] },
+    { label: "Tổng điểm mục tiêu", aliases: ["tongdiemmuctieu"] }
+  ];
+  const missingRequired = requiredColumns
+    .filter(item => findFirstColumn(headers, item.aliases) < 0)
+    .map(item => item.label);
+  const warnings = recommendedColumns
+    .filter(item => findFirstColumn(headers, item.aliases) < 0)
+    .map(item => "Nên bổ sung cột " + item.label);
+
+  const idColumn = findFirstColumn(headers, ["mahs"]);
+  const nameColumn = findFirstColumn(headers, ["hoten"]);
+  const lookupColumn = findFirstColumn(headers, ["matracuu", "pinphhs"]);
+  const studentRows = values.slice(1).filter(row =>
+    (idColumn >= 0 && String(row[idColumn] || "").trim()) ||
+    (nameColumn >= 0 && String(row[nameColumn] || "").trim())
+  );
+
+  if (lookupColumn >= 0 && studentRows.length) {
+    const validCodes = [];
+    let missingOrInvalid = 0;
+
+    studentRows.forEach(row => {
+      const code = normalizePhone(row[lookupColumn] || "");
+      if (/^\d{5}$/.test(code)) {
+        validCodes.push(code);
+      } else {
+        missingOrInvalid++;
+      }
+    });
+
+    const duplicateCount = validCodes.length -
+      new Set(validCodes).size;
+
+    if (missingOrInvalid) {
+      warnings.push(
+        missingOrInvalid +
+        " học sinh chưa có mã tra cứu hợp lệ gồm 5 chữ số"
+      );
+    }
+    if (duplicateCount) {
+      warnings.push(
+        duplicateCount +
+        " mã tra cứu đang bị trùng"
+      );
+    }
+  }
+
+  return createSheetCheck(
+    name,
+    true,
+    true,
+    missingRequired,
+    warnings,
+    studentRows.length + " học sinh",
+    studentRows.length
+  );
+}
+
+function inspectScoreSheetSetup(ss) {
+  const name = "BANG_DIEM_WEB";
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return createSheetCheck(
+      name,
+      true,
+      false,
+      ["Thiếu sheet BANG_DIEM_WEB"],
+      [],
+      "Điểm kiểm tra và ghi chú từng ô",
+      0
+    );
+  }
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const missingRequired = [];
+  const warnings = [];
+  const firstRow = values[0] || [];
+
+  if (normalizeHeader(firstRow[0]) !== "mahs") {
+    missingRequired.push("Ô A1 phải là MaHS");
+  }
+  if (normalizeHeader(firstRow[1]) !== "hoten") {
+    missingRequired.push("Ô B1 phải là HoTen");
+  }
+
+  const codes = values[2] || [];
+  const titles = values[3] || [];
+  let validTestCount = 0;
+  for (let column = 2; column < codes.length; column++) {
+    const code = String(codes[column] || "").trim().toUpperCase();
+    if (
+      /^(TOAN|VAN|ANH|LY|HOA|SINH)_BAI_\d+$/.test(code) &&
+      String(titles[column] || "").trim()
+    ) {
+      validTestCount++;
+    }
+  }
+
+  if (!validTestCount) {
+    warnings.push(
+      "Chưa có bài kiểm tra hợp lệ ở hàng 3 và tên bài ở hàng 4"
+    );
+  }
+
+  const studentCount = values.slice(5).filter(row =>
+    String(row[0] || "").trim() || String(row[1] || "").trim()
+  ).length;
+
+  return createSheetCheck(
+    name,
+    true,
+    true,
+    missingRequired,
+    warnings,
+    validTestCount + " bài kiểm tra hợp lệ",
+    studentCount
+  );
+}
+
+function inspectCommentSheetSetup(ss) {
+  const name = "NHAN_XET";
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return createSheetCheck(
+      name,
+      false,
+      false,
+      [],
+      ["Chưa có sheet NHAN_XET nên cổng PHHS chưa hiển thị nhận xét"],
+      "Nhận xét giáo viên theo tuần",
+      0
+    );
+  }
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const firstRow = values[0] || [];
+  const missingRequired = [];
+  const warnings = [];
+
+  if (normalizeHeader(firstRow[0]) !== "mahs") {
+    missingRequired.push("Ô A1 phải là MaHS");
+  }
+  if (normalizeHeader(firstRow[1]) !== "hoten") {
+    warnings.push("Nên đặt ô B1 là HoTen");
+  }
+
+  const weekCount = firstRow.filter(value =>
+    /^TUAN_\d+$/.test(String(value || "").trim().toUpperCase())
+  ).length;
+  if (!weekCount) {
+    warnings.push("Chưa có cột tuần dạng TUAN_1, TUAN_2...");
+  }
+
+  const studentCount = values.slice(1).filter(row =>
+    String(row[0] || "").trim()
+  ).length;
+
+  return createSheetCheck(
+    name,
+    false,
+    true,
+    missingRequired,
+    warnings,
+    weekCount + " cột nhận xét theo tuần",
+    studentCount
+  );
+}
+
+function inspectAttendanceSheetSetup(ss) {
+  const name = "DIEM_DANH";
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return createSheetCheck(
+      name,
+      false,
+      false,
+      [],
+      ["Sheet sẽ tự tạo khi lưu điểm danh lần đầu"],
+      "Lịch sử chuyên cần",
+      0
+    );
+  }
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const headers = (values[0] || []).map(normalizeHeader);
+  const expected = ["ngay", "mahs", "trangthai", "capnhatluc"];
+  const labels = ["Ngày", "MaHS", "Trạng thái", "Cập nhật lúc"];
+  const missingRequired = [];
+
+  expected.forEach((header, index) => {
+    if (headers[index] !== header) {
+      missingRequired.push(
+        "Cột " + String.fromCharCode(65 + index) + " phải là " + labels[index]
+      );
+    }
+  });
+
+  const recordCount = values.slice(1).filter(row =>
+    String(row[0] || "").trim() && String(row[1] || "").trim()
+  ).length;
+
+  return createSheetCheck(
+    name,
+    false,
+    true,
+    missingRequired,
+    [],
+    recordCount + " bản ghi điểm danh",
+    recordCount
+  );
+}
+
+function inspectSettingsSheetSetup(ss) {
+  const name = "CAI_DAT_WEB";
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    return createSheetCheck(
+      name,
+      false,
+      false,
+      [],
+      ["Sheet sẽ tự tạo khi lưu tên lớp"],
+      "Tên lớp dùng chung cho cổng giáo viên và phụ huynh",
+      0
+    );
+  }
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const headers = (values[0] || []).map(normalizeHeader);
+  const expected = ["khoa", "giatri", "capnhatluc"];
+  const labels = ["Khoa", "GiaTri", "CapNhatLuc"];
+  const warnings = [];
+
+  expected.forEach((header, index) => {
+    if (headers[index] !== header) {
+      warnings.push(
+        "Nên đặt cột " + String.fromCharCode(65 + index) +
+        " là " + labels[index]
+      );
+    }
+  });
+
+  return createSheetCheck(
+    name,
+    false,
+    true,
+    [],
+    warnings,
+    "Cấu hình công khai của lớp",
+    Math.max(values.length - 1, 0)
+  );
 }
 
 function normalizeClassName(value) {
