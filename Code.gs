@@ -78,6 +78,7 @@ function doGet(e) {
           ok: true,
           updatedAt: new Date().toISOString(),
           generatedCount: result.generatedCount,
+          spreadsheetUrl: ss.getUrl(),
           students: getClassList()
         },
         callback
@@ -95,6 +96,7 @@ function doGet(e) {
           ok: true,
           updatedAt: new Date().toISOString(),
           students: students,
+          spreadsheetUrl: ss.getUrl(),
           attendance: readAttendance(ss, "", studentCodes)
         },
         callback

@@ -936,11 +936,10 @@ window.closeModal = function(id) {
                             <p class="text-slate-500 text-sm font-medium mt-1">Thông tin chi tiết, vai trò và mục tiêu phấn đấu của các em</p>
                         </div>
                         <div class="flex flex-wrap gap-3 w-full sm:w-auto">
-                            <button onclick="syncClassFromGoogle()" class="flex-1 sm:flex-none px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ Sheet</button>
-                            <button id="generate-lookup-codes-button" onclick="generateMissingLookupCodes()" class="flex-1 sm:flex-none px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-xl text-sm shadow-sm hover:bg-amber-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-key text-lg"></i> Tạo mã PIN</button>
+                            <button onclick="syncClassFromGoogle()" class="flex-1 sm:flex-none px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Tải lại dữ liệu</button>
+                            <button id="generate-lookup-codes-button" onclick="generateMissingLookupCodes()" class="flex-1 sm:flex-none px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-xl text-sm shadow-sm hover:bg-amber-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-key text-lg"></i> Bổ sung mã còn thiếu</button>
                             <button onclick="openEditStudentModal(null)" class="flex-1 sm:flex-none px-5 py-3 bg-[#0f172a] text-white font-bold rounded-xl text-sm shadow-md hover:bg-black transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-user-plus text-lg"></i> Thêm HS</button>
-                            <button onclick="downloadTemplate()" class="flex-1 sm:flex-none px-5 py-3 bg-white text-slate-600 border border-slate-200 font-bold rounded-xl text-sm shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"><i class="ph-fill ph-download-simple text-green-600 text-lg"></i> File mẫu</button>
-                            <button onclick="openImportModal()" class="flex-1 sm:flex-none px-5 py-3 bg-blue-50 text-blue-700 border border-blue-100 font-bold rounded-xl text-sm shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-upload-simple text-lg"></i> Nhập DS</button>
+                            <button onclick="openConnectedGoogleSheet()" class="flex-1 sm:flex-none px-5 py-3 bg-blue-50 text-blue-700 border border-blue-200 font-bold rounded-xl text-sm shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-table text-lg"></i> Mở Google Sheet</button>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 xl:gap-8">
@@ -3751,6 +3750,23 @@ window.openEditGroupModal = function(id) {
         // API Google Sheets: chỉ trả về dữ liệu của học sinh khớp mã tra cứu.
         const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAOm6rvHIUbC1jq8oCY5yGVLT4y8Wp9J250Yl9lQfK1D1m4zIN7OnHahw3bKzE2nTC/exec";
 
+        window.googleSpreadsheetUrl = window.googleSpreadsheetUrl || "";
+
+        window.openConnectedGoogleSheet = function() {
+            if (!window.googleSpreadsheetUrl) {
+                showToast(
+                    "Chưa nhận được đường dẫn Sheet. Hãy bấm Tải lại dữ liệu rồi thử lại.",
+                    "error"
+                );
+                return;
+            }
+            window.open(
+                window.googleSpreadsheetUrl,
+                "_blank",
+                "noopener,noreferrer"
+            );
+        };
+
         window.googleAdminKey = window.googleAdminKey || (() => {
             try {
                 return sessionStorage.getItem("chuyen_tau_google_admin_key") || "";
@@ -4411,6 +4427,9 @@ window.openEditGroupModal = function(id) {
                 }
 
                 rememberGoogleAdminKey(adminKey);
+                window.googleSpreadsheetUrl = String(
+                    response.spreadsheetUrl || window.googleSpreadsheetUrl || ""
+                );
                 state.students = response.students.map(mergeStudentFromGoogle);
                 saveData();
                 renderLayout();
@@ -4455,6 +4474,9 @@ window.openEditGroupModal = function(id) {
                 state.scores = [];
                 state.teacherComments = [];
                 rememberGoogleAdminKey(adminKey);
+                window.googleSpreadsheetUrl = String(
+                    response.spreadsheetUrl || window.googleSpreadsheetUrl || ""
+                );
                 applyGoogleAttendance(
                     response.attendance || [],
                     true,
