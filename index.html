@@ -5049,13 +5049,28 @@ window.openEditGroupModal = function(id) {
 window.performDirectLookup = function() {
             lookupParentFromGoogle(document.getElementById('direct-lookup-code').value);
         };
+
+        window.logoutParentPortal = function() {
+            window.parentLookupInProgress = false;
+            window.parentSubject = "Toán";
+            openParentLookupModal();
+
+            requestAnimationFrame(() => {
+                const input = document.getElementById("lookup-code-input");
+                if (input) {
+                    input.value = "";
+                    input.focus();
+                }
+            });
+        };
+
         function showParentView(studentId) {
             const student = state.students.find(s => s.id === studentId); if (!student) return;
             const portalMode = isParentPortalMode();
             const closeAction = portalMode
-                ? "openParentLookupModal()"
+                ? "logoutParentPortal()"
                 : "closeModal('parent-view-modal')";
-            const closeLabel = portalMode ? "Tra cứu học sinh khác" : "Đóng";
+            const closeLabel = portalMode ? "Đăng xuất" : "Đóng";
             const maxPoints = 500; const milestones = [100, 300, 500];
             const currentPoints = student.points || 0;
             let nextMilestone = milestones.find(m => m > currentPoints) || maxPoints;
