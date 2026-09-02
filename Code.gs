@@ -771,6 +771,14 @@ function saveStudentRecord(ss, input) {
   try {
     const sheet = ss.getSheetByName("HOC_SINH");
     if (!sheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
+    const scoreSheet = ss.getSheetByName("BANG_DIEM_WEB");
+    if (!scoreSheet) {
+      throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
+    }
+    const commentSheet = ss.getSheetByName("NHAN_XET");
+    if (!commentSheet) {
+      throw new Error('Không tìm thấy sheet "NHAN_XET".');
+    }
 
     const values = sheet.getDataRange().getDisplayValues();
     const headers = values[0].map(normalizeHeader);
@@ -793,6 +801,21 @@ function saveStudentRecord(ss, input) {
     if (isNew && targetRow) throw new Error("Mã học sinh này đã tồn tại trên Google Sheet.");
     if (!isNew && !targetRow) throw new Error("Không tìm thấy học sinh cần cập nhật trên Google Sheet.");
     if (!targetRow) targetRow = Math.max(sheet.getLastRow() + 1, 2);
+
+    const scoreIdentity = prepareStudentIdentityRow(
+      scoreSheet,
+      studentCode,
+      originalStudentCode,
+      isNew,
+      6
+    );
+    const commentIdentity = prepareStudentIdentityRow(
+      commentSheet,
+      studentCode,
+      originalStudentCode,
+      isNew,
+      2
+    );
 
     const usedCodes = new Set();
     if (sheet.getLastRow() >= 2) {
@@ -822,6 +845,9 @@ function saveStudentRecord(ss, input) {
       sheet.getRange(targetRow, goalColumn + 1).setValue(String(input.tongDiemMucTieu || "").trim());
     }
 
+    writeStudentIdentityRow(scoreSheet, scoreIdentity.targetRow, studentCode, name);
+    writeStudentIdentityRow(commentSheet, commentIdentity.targetRow, studentCode, name);
+
     SpreadsheetApp.flush();
     return {
       studentCode: studentCode,
@@ -834,6 +860,46 @@ function saveStudentRecord(ss, input) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function prepareStudentIdentityRow(
+  sheet,
+  studentCode,
+  originalStudentCode,
+  isNew,
+  firstDataRow
+) {
+  const lastRow = sheet.getLastRow();
+  const rowCount = Math.max(0, lastRow - firstDataRow + 1);
+  const values = rowCount
+    ? sheet.getRange(firstDataRow, 1, rowCount, 2).getDisplayValues()
+    : [];
+  const lookupCode = isNew ? studentCode : originalStudentCode;
+  let targetRow = 0;
+
+  values.forEach((row, index) => {
+    const rowCode = normalizeStudentCode(row[0]);
+    if (rowCode === studentCode && rowCode !== lookupCode) {
+      throw new Error(
+        'Mã học sinh "' + studentCode +
+        '" đã tồn tại trong sheet "' + sheet.getName() + '".'
+      );
+    }
+    if (!targetRow && rowCode === lookupCode) {
+      targetRow = firstDataRow + index;
+    }
+  });
+
+  return {
+    targetRow: targetRow || Math.max(lastRow + 1, firstDataRow)
+  };
+}
+
+function writeStudentIdentityRow(sheet, targetRow, studentCode, name) {
+  sheet.getRange(targetRow, 1)
+    .setNumberFormat("@")
+    .setValue(studentCode);
+  sheet.getRange(targetRow, 2).setValue(name);
 }
 
 function generateRandomLookupCode(usedCodes) {
