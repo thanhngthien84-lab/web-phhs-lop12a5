@@ -295,7 +295,7 @@ function saveStudentRecord(ss, input) {
     const headers = values[0].map(normalizeHeader);
     const idColumn = requireColumn(headers, "mahs", "Mã HS");
     const nameColumn = requireColumn(headers, "hoten", "Họ tên");
-    const phoneColumn = ensureSheetColumn(sheet, headers, ["sdtphhs"], "SDT_PHHS");
+    const phoneColumn = ensureSheetColumn(sheet, headers, ["sdtphhs", "sodienthoaiphhs"], "SDT_PHHS");
     const lookupColumn = ensureSheetColumn(sheet, headers, ["matracuu", "pinphhs"], "MaTraCuu");
     const blockColumn = headers.indexOf("khoithi");
     const goalColumn = headers.indexOf("tongdiemmuctieu");
@@ -379,7 +379,7 @@ function generateMissingLookupCodes(ss) {
       .getDisplayValues()[0].map(normalizeHeader);
     const idColumn = requireColumn(headers, "mahs", "Mã HS");
     const nameColumn = requireColumn(headers, "hoten", "Họ tên");
-    const phoneColumn = findFirstColumn(headers, ["sdtphhs"]);
+    const phoneColumn = findFirstColumn(headers, ["sdtphhs", "sodienthoaiphhs"]);
     const lookupColumn = ensureSheetColumn(sheet, headers, ["matracuu", "pinphhs"], "MaTraCuu");
     const lastColumn = Math.max(sheet.getLastColumn(), lookupColumn + 1);
     const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
@@ -430,7 +430,7 @@ function getClassList() {
   const headers = values[0].map(normalizeHeader);
   const idColumn = requireColumn(headers, "mahs", "Mã HS");
   const nameColumn = requireColumn(headers, "hoten", "Họ tên");
-  const phoneColumn = findFirstColumn(headers, ["sdtphhs"]);
+  const phoneColumn = findFirstColumn(headers, ["sdtphhs", "sodienthoaiphhs"]);
   const lookupColumn = findFirstColumn(headers, ["matracuu", "pinphhs"]);
   const legacyLookupColumn = lookupColumn >= 0 ? lookupColumn : phoneColumn;
   const blockColumn = headers.indexOf("khoithi");
@@ -459,7 +459,7 @@ function getStudentData(lookupCode) {
   const studentHeaders = studentValues[0].map(normalizeHeader);
   const idColumn = requireColumn(studentHeaders, "mahs", "Mã HS");
   const nameColumn = requireColumn(studentHeaders, "hoten", "Họ tên");
-  const phoneColumn = findFirstColumn(studentHeaders, ["sdtphhs"]);
+  const phoneColumn = findFirstColumn(studentHeaders, ["sdtphhs", "sodienthoaiphhs"]);
   const dedicatedLookupColumn = findFirstColumn(studentHeaders, ["matracuu", "pinphhs"]);
   const lookupColumn = dedicatedLookupColumn >= 0 ? dedicatedLookupColumn : phoneColumn;
   if (lookupColumn < 0) throw new Error('Sheet "HOC_SINH" thiếu cột "MaTraCuu".');
