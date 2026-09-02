@@ -4332,6 +4332,32 @@ window.openEditGroupModal = function(id) {
             showParentView(remoteStudent.id);
         }
 
+        function mergeStudentFromGoogle(student) {
+            const code = String(student.studentCode || "").trim();
+            const existing = (state.students || []).find(item =>
+                String(item.studentCode || "").trim() === code
+            );
+
+            return {
+                points: 0,
+                stars: 0,
+                group: "",
+                role: "",
+                talent: "",
+                avatarUrl: "",
+                gender: "",
+                history: [],
+                ...(existing || {}),
+                id: existing ? existing.id : "google-" + code,
+                studentCode: code,
+                name: student.name,
+                parentPhone: student.parentPhone,
+                lookupCode: student.lookupCode,
+                khoiThi: student.khoiThi,
+                tongDiemMucTieu: student.tongDiemMucTieu
+            };
+        }
+
         window.generateMissingLookupCodes = function() {
             if (!window.confirm(
                 "Tạo mã tra cứu ngẫu nhiên 5 chữ số cho học sinh chưa có mã hợp lệ? Các mã 5 chữ số hiện có sẽ được giữ nguyên."
@@ -4385,23 +4411,7 @@ window.openEditGroupModal = function(id) {
                 }
 
                 rememberGoogleAdminKey(adminKey);
-                state.students = response.students.map(student => ({
-                    id: "google-" + student.studentCode,
-                    studentCode: student.studentCode,
-                    name: student.name,
-                    parentPhone: student.parentPhone,
-                    lookupCode: student.lookupCode,
-                    khoiThi: student.khoiThi,
-                    tongDiemMucTieu: student.tongDiemMucTieu,
-                    points: 0,
-                    stars: 0,
-                    group: "",
-                    role: "",
-                    talent: "",
-                    avatarUrl: "",
-                    gender: "",
-                    history: []
-                }));
+                state.students = response.students.map(mergeStudentFromGoogle);
                 saveData();
                 renderLayout();
 
@@ -4441,12 +4451,7 @@ window.openEditGroupModal = function(id) {
                 if (!response || !response.ok || !Array.isArray(response.students)) {
                     return showToast((response && response.message) || "Không thể đồng bộ danh sách.", "error");
                 }
-                state.students = response.students.map((student, index) => ({
-                    id: "google-" + student.studentCode,
-                    studentCode: student.studentCode, name: student.name, parentPhone: student.parentPhone, lookupCode: student.lookupCode,
-                    khoiThi: student.khoiThi, tongDiemMucTieu: student.tongDiemMucTieu,
-                    points: 0, stars: 0, group: "", role: "", talent: "", avatarUrl: "", gender: "", history: []
-                }));
+                state.students = response.students.map(mergeStudentFromGoogle);
                 state.scores = [];
                 state.teacherComments = [];
                 rememberGoogleAdminKey(adminKey);
