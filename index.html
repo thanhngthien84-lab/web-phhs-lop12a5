@@ -935,10 +935,11 @@ window.closeModal = function(id) {
                             </h2>
                             <p class="text-slate-500 text-sm font-medium mt-1">Thông tin chi tiết, vai trò và mục tiêu phấn đấu của các em</p>
                         </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 w-full">
                             <button onclick="syncClassFromGoogle()" class="w-full px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Tải lại dữ liệu</button>
                             <button id="generate-lookup-codes-button" onclick="generateMissingLookupCodes()" class="w-full px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-xl text-sm shadow-sm hover:bg-amber-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-key text-lg"></i> Bổ sung mã còn thiếu</button>
                             <button onclick="openEditStudentModal(null)" class="w-full px-5 py-3 bg-[#0f172a] text-white font-bold rounded-xl text-sm shadow-md hover:bg-black transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-user-plus text-lg"></i> Thêm HS</button>
+                            <button onclick="openBulkStudentModal()" class="w-full px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold rounded-xl text-sm shadow-sm hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-rows-plus-bottom text-lg"></i> Nhập nhanh</button>
                             <button onclick="openConnectedGoogleSheet()" class="w-full px-5 py-3 bg-blue-50 text-blue-700 border border-blue-200 font-bold rounded-xl text-sm shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-table text-lg"></i> Mở Google Sheet</button>
                         </div>
                     </div>
@@ -3184,7 +3185,266 @@ window.closeModal = function(id) {
         
         function deleteReward(id) { if (confirm("Xóa quà tặng này khỏi cửa hàng?")) { state.rewards = state.rewards.filter(r => r.id !== id); saveData(); renderLayout(); showToast("Đã xóa quà tặng!"); } }
 
-     function openEditStudentModal(id) {
+     
+window.bulkStudentRowCounter = 0;
+
+window.openBulkStudentModal = function() {
+    const modalHtml = `
+        <div class="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-3 md:p-5 backdrop-blur-sm animate-fade-in" id="bulk-student-modal">
+            <div class="bg-white rounded-[2rem] shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[94vh]">
+                <div class="p-5 md:p-6 border-b border-slate-100 flex justify-between items-center bg-white">
+                    <div>
+                        <h3 class="font-black text-xl text-[#0f172a] flex items-center gap-3">
+                            <span class="p-2 bg-indigo-100 text-indigo-700 rounded-xl"><i class="ph-bold ph-rows-plus-bottom"></i></span>
+                            NHẬP NHANH HỌC SINH
+                        </h3>
+                        <p class="text-sm text-slate-500 mt-2">Nhập trực tiếp hoặc dán 4 cột từ Excel/Google Sheet. Mã HS và mã tra cứu sẽ được tạo tự động.</p>
+                    </div>
+                    <button onclick="closeModal('bulk-student-modal')" class="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500"><i class="ph-bold ph-x"></i></button>
+                </div>
+                <div class="px-5 md:px-7 py-4 bg-indigo-50/70 border-b border-indigo-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div class="text-sm text-indigo-800 font-semibold"><i class="ph-bold ph-lightbulb mr-1"></i> Thứ tự khi dán: Họ và tên → SĐT PHHS → Khối thi → Tổng điểm mục tiêu.</div>
+                    <button onclick="addBulkStudentRow()" class="px-4 py-2.5 bg-white text-indigo-700 border border-indigo-200 rounded-xl font-bold text-sm hover:bg-indigo-100"><i class="ph-bold ph-plus mr-1"></i> Thêm dòng</button>
+                </div>
+                <div class="flex-1 overflow-auto custom-scrollbar">
+                    <table class="w-full min-w-[900px] border-collapse">
+                        <thead class="sticky top-0 z-10 bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                            <tr>
+                                <th class="px-4 py-3 text-center w-14">STT</th>
+                                <th class="px-3 py-3 text-left">Họ và tên <span class="text-red-500">*</span></th>
+                                <th class="px-3 py-3 text-left">Số điện thoại PHHS</th>
+                                <th class="px-3 py-3 text-left">Khối thi</th>
+                                <th class="px-3 py-3 text-left">Tổng điểm mục tiêu</th>
+                                <th class="px-3 py-3 w-14"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="bulk-student-rows"></tbody>
+                    </table>
+                </div>
+                <div class="p-5 md:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div id="bulk-student-count" class="text-sm font-bold text-slate-500">0 học sinh có dữ liệu</div>
+                    <div class="flex gap-3 w-full sm:w-auto">
+                        <button onclick="closeModal('bulk-student-modal')" class="flex-1 sm:flex-none px-7 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-100">Hủy</button>
+                        <button id="save-bulk-students-button" onclick="saveBulkStudents()" class="flex-1 sm:flex-none px-8 py-3 bg-[#0f172a] text-white font-black rounded-xl hover:bg-black shadow-lg disabled:opacity-60 disabled:cursor-wait">
+                            <i class="ph-bold ph-cloud-arrow-up mr-1"></i> Lưu danh sách
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById("modal-container").innerHTML = modalHtml;
+    window.bulkStudentRowCounter = 0;
+    for (let index = 0; index < 8; index++) addBulkStudentRow();
+    const firstInput = document.querySelector("#bulk-student-rows [data-field='name']");
+    if (firstInput) firstInput.focus();
+};
+
+window.addBulkStudentRow = function(values) {
+    const tbody = document.getElementById("bulk-student-rows");
+    if (!tbody) return;
+    const row = document.createElement("tr");
+    row.className = "bulk-student-row border-b border-slate-100 hover:bg-indigo-50/30";
+    row.dataset.rowId = String(++window.bulkStudentRowCounter);
+    row.innerHTML = '<td class="bulk-row-number px-4 py-3 text-center text-sm font-bold text-slate-400"></td>' +
+        '<td class="px-3 py-2"><input data-field="name" type="text" placeholder="Nguyễn Văn A" class="w-full min-w-[220px] px-3 py-2.5 border border-slate-200 rounded-xl font-bold text-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
+        '<td class="px-3 py-2"><input data-field="parentPhone" inputmode="tel" type="text" placeholder="0912345678" class="w-full min-w-[155px] px-3 py-2.5 border border-slate-200 rounded-xl font-semibold focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
+        '<td class="px-3 py-2"><input data-field="khoiThi" type="text" placeholder="A00" class="w-full min-w-[110px] px-3 py-2.5 border border-slate-200 rounded-xl font-semibold focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
+        '<td class="px-3 py-2"><input data-field="tongDiemMucTieu" inputmode="decimal" type="text" placeholder="26" class="w-full min-w-[150px] px-3 py-2.5 border border-slate-200 rounded-xl font-semibold focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
+        '<td class="px-3 py-2 text-center"><button type="button" onclick="removeBulkStudentRow(this)" class="w-9 h-9 rounded-xl text-red-500 hover:bg-red-50" title="Xóa dòng"><i class="ph-bold ph-trash"></i></button></td>';
+    tbody.appendChild(row);
+    const data = values || [];
+    ["name", "parentPhone", "khoiThi", "tongDiemMucTieu"].forEach(function(field, column) {
+        row.querySelector("[data-field='" + field + "']").value = String(data[column] || "").trim();
+    });
+    row.querySelectorAll("input").forEach(function(input) {
+        input.addEventListener("input", updateBulkStudentCount);
+        input.addEventListener("paste", handleBulkStudentPaste);
+    });
+    renumberBulkStudentRows();
+    updateBulkStudentCount();
+};
+
+window.removeBulkStudentRow = function(button) {
+    const rows = document.querySelectorAll(".bulk-student-row");
+    if (rows.length <= 1) {
+        rows[0].querySelectorAll("input").forEach(function(input) { input.value = ""; });
+    } else {
+        button.closest("tr").remove();
+    }
+    renumberBulkStudentRows();
+    updateBulkStudentCount();
+};
+
+window.renumberBulkStudentRows = function() {
+    document.querySelectorAll(".bulk-student-row").forEach(function(row, index) {
+        const number = row.querySelector(".bulk-row-number");
+        if (number) number.textContent = String(index + 1);
+    });
+};
+
+window.updateBulkStudentCount = function() {
+    const count = Array.from(document.querySelectorAll(".bulk-student-row")).filter(function(row) {
+        return Array.from(row.querySelectorAll("input")).some(function(input) {
+            return input.value.trim();
+        });
+    }).length;
+    const label = document.getElementById("bulk-student-count");
+    if (label) label.textContent = count + " học sinh có dữ liệu";
+};
+
+window.handleBulkStudentPaste = function(event) {
+    const text = event.clipboardData && event.clipboardData.getData("text");
+    if (!text || (!text.includes("\t") && !/[\r\n]/.test(text))) return;
+    event.preventDefault();
+    const pastedRows = text.replace(/\r/g, "").split("\n").filter(function(line) {
+        return line.trim();
+    }).map(function(line) {
+        return line.split("\t");
+    });
+    if (!pastedRows.length) return;
+
+    const allRows = Array.from(document.querySelectorAll(".bulk-student-row"));
+    const startIndex = allRows.indexOf(event.target.closest("tr"));
+    const fields = ["name", "parentPhone", "khoiThi", "tongDiemMucTieu"];
+
+    while (document.querySelectorAll(".bulk-student-row").length < startIndex + pastedRows.length) {
+        addBulkStudentRow();
+    }
+
+    const targetRows = Array.from(document.querySelectorAll(".bulk-student-row"));
+    pastedRows.forEach(function(cells, rowOffset) {
+        fields.forEach(function(field, column) {
+            if (cells[column] === undefined) return;
+            targetRows[startIndex + rowOffset].querySelector("[data-field='" + field + "']").value = String(cells[column]).trim();
+        });
+    });
+    updateBulkStudentCount();
+};
+
+window.collectBulkStudents = function() {
+    const students = [];
+    const invalidRows = [];
+    document.querySelectorAll(".bulk-student-row").forEach(function(row, index) {
+        const item = {};
+        row.querySelectorAll("input[data-field]").forEach(function(input) {
+            item[input.dataset.field] = input.value.trim();
+            input.classList.remove("border-red-400", "bg-red-50");
+        });
+        const hasData = Object.keys(item).some(function(key) { return item[key]; });
+        if (!hasData) return;
+        if (!item.name) {
+            invalidRows.push(index + 1);
+            row.querySelector("[data-field='name']").classList.add("border-red-400", "bg-red-50");
+            return;
+        }
+        item.parentPhone = String(item.parentPhone || "").replace(/\D/g, "");
+        if (item.tongDiemMucTieu && !Number.isFinite(Number(item.tongDiemMucTieu.replace(",", ".")))) {
+            invalidRows.push(index + 1);
+            row.querySelector("[data-field='tongDiemMucTieu']").classList.add("border-red-400", "bg-red-50");
+            return;
+        }
+        students.push(item);
+    });
+    if (invalidRows.length) {
+        throw new Error("Vui lòng kiểm tra lại dòng " + invalidRows.join(", ") + ".");
+    }
+    if (!students.length) throw new Error("Chưa có học sinh nào để lưu.");
+    return students;
+};
+
+window.requestBulkStudentSaveToGoogle = function(students, adminKey) {
+    return new Promise(function(resolve, reject) {
+        const callbackName = "googleBulkStudentSaveCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+        const script = document.createElement("script");
+        let finished = false;
+        const timeout = setTimeout(function() {
+            finish({ ok: false, message: "Hệ thống phản hồi chậm khi lưu danh sách." });
+        }, 30000);
+
+        function cleanup() {
+            clearTimeout(timeout);
+            delete window[callbackName];
+            script.remove();
+        }
+        function finish(response) {
+            if (finished) return;
+            finished = true;
+            cleanup();
+            if (!response || !response.ok || !Array.isArray(response.students)) {
+                if (response && response.message === "Mã quản trị không chính xác.") clearGoogleAdminKey();
+                reject(new Error((response && response.message) || "Không thể lưu danh sách lên Google Sheet."));
+                return;
+            }
+            resolve(response);
+        }
+        window[callbackName] = finish;
+        script.onerror = function() {
+            finish({ ok: false, message: "Không thể kết nối để lưu danh sách học sinh." });
+        };
+        script.src = GOOGLE_SHEET_API_URL +
+            "?mode=students-bulk-save&adminKey=" + encodeURIComponent(adminKey) +
+            "&students=" + encodeURIComponent(JSON.stringify(students)) +
+            "&callback=" + callbackName;
+        document.head.appendChild(script);
+    });
+};
+
+window.saveBulkStudents = async function() {
+    let students;
+    try {
+        students = collectBulkStudents();
+    } catch (error) {
+        return showToast(error.message, "error");
+    }
+    const adminKey = getGoogleAdminKey();
+    if (!adminKey) return;
+
+    const button = document.getElementById("save-bulk-students-button");
+    if (button) button.disabled = true;
+    const savedStudents = [];
+
+    try {
+        for (let start = 0; start < students.length; start += 4) {
+            const batch = students.slice(start, start + 4);
+            if (button) button.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin mr-1"></i> Đang lưu ' + Math.min(start + batch.length, students.length) + '/' + students.length;
+            const response = await requestBulkStudentSaveToGoogle(batch, adminKey);
+            savedStudents.push.apply(savedStudents, response.students);
+        }
+
+        savedStudents.forEach(function(student) {
+            const merged = mergeStudentFromGoogle(student);
+            const index = state.students.findIndex(function(item) {
+                return String(item.studentCode || "").trim() === String(student.studentCode || "").trim();
+            });
+            if (index >= 0) state.students[index] = merged;
+            else state.students.push(merged);
+        });
+        rememberGoogleAdminKey(adminKey);
+        saveData();
+        closeModal("bulk-student-modal");
+        renderLayout();
+        showToast("Đã thêm " + savedStudents.length + " học sinh và tự tạo mã truy cập!", "success");
+    } catch (error) {
+        if (savedStudents.length) {
+            savedStudents.forEach(function(student) {
+                const exists = state.students.some(function(item) {
+                    return String(item.studentCode || "").trim() === String(student.studentCode || "").trim();
+                });
+                if (!exists) state.students.push(mergeStudentFromGoogle(student));
+            });
+            saveData();
+            renderLayout();
+        }
+        if (button && button.isConnected) {
+            button.disabled = false;
+            button.innerHTML = '<i class="ph-bold ph-cloud-arrow-up mr-1"></i> Lưu danh sách';
+        }
+        showToast((savedStudents.length ? "Đã lưu " + savedStudents.length + " học sinh. " : "") + (error.message || "Không thể lưu toàn bộ danh sách."), "error");
+    }
+};
+
+function openEditStudentModal(id) {
             state.editingStudentId = id;
             const s = id ? state.students.find(x => x.id === id) : { name: '', role: '', goal: '', talent: '', group: 'Tổ 1', avatarUrl: '', gender: 'Nữ', dob: '', boardingType: 'Ngoại trú' };
             if (!s && id) return;
