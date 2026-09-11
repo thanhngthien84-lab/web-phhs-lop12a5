@@ -131,6 +131,44 @@ function doGet(e) {
       );
     }
 
+    if (mode === "score-book") {
+      assertAdminKey(parameters.adminKey);
+
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          scoreBook: readScoreBookForAdmin(
+            SpreadsheetApp.getActiveSpreadsheet()
+          )
+        },
+        callback
+      );
+    }
+
+    if (mode === "score-book-save") {
+      assertAdminKey(parameters.adminKey);
+
+      let scoreData;
+      try {
+        scoreData = JSON.parse(String(parameters.scoreData || "{}"));
+      } catch (error) {
+        throw new Error("Dữ liệu điểm không hợp lệ.");
+      }
+
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          scoreBook: saveScoreBookForAdmin(
+            SpreadsheetApp.getActiveSpreadsheet(),
+            scoreData
+          )
+        },
+        callback
+      );
+    }
+
     if (mode === "class") {
       assertAdminKey(parameters.adminKey);
 
@@ -1215,6 +1253,200 @@ function getStudentData(lookupCode) {
     comments: readComments(ss, student.studentCode),
     attendance: readAttendance(ss, student.studentCode)
   };
+}
+
+function getScoreSubjectMap() {
+  return {
+    TOAN: "Toán",
+    VAN: "Văn",
+    ANH: "Anh",
+    LY: "Lý",
+    HOA: "Hoá",
+    SINH: "Sinh"
+  };
+}
+
+function readScoreBookForAdmin(ss) {
+  const sheet = ss.getSheetByName("BANG_DIEM_WEB");
+  if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
+
+  const range = sheet.getDataRange();
+  const values = range.getDisplayValues();
+  const notes = range.getNotes();
+  const subjectMap = getScoreSubjectMap();
+  const tests = [];
+  const rows = [];
+
+  if (values.length >= 5) {
+    const codes = values[2] || [];
+    const titles = values[3] || [];
+    const dates = values[4] || [];
+
+    for (let column = 2; column < codes.length; column++) {
+      const code = String(codes[column] || "").trim().toUpperCase();
+      const match = code.match(/^(TOAN|VAN|ANH|LY|HOA|SINH)_BAI_(\d+)$/);
+      if (!match || !String(titles[column] || "").trim()) continue;
+
+      const validScores = [];
+      for (let row = 5; row < values.length; row++) {
+        const rawScore = String(values[row][column] || "").trim();
+        if (!rawScore) continue;
+        const score = Number(rawScore.replace(",", "."));
+        if (Number.isFinite(score)) validScores.push(score);
+      }
+
+      tests.push({
+        code: code,
+        subjectCode: match[1],
+        subject: subjectMap[match[1]],
+        number: Number(match[2]),
+        title: String(titles[column] || "").trim(),
+        date: String(dates[column] || "").trim(),
+        classAverage: validScores.length
+          ? validScores.reduce((sum, score) => sum + score, 0) / validScores.length
+          : null
+      });
+    }
+  }
+
+  for (let row = 5; row < values.length; row++) {
+    const studentCode = normalizeStudentCode(values[row][0]);
+    const name = String(values[row][1] || "").trim();
+    if (!studentCode && !name) continue;
+
+    const scores = {};
+    tests.forEach(test => {
+      const column = (values[2] || []).findIndex(value =>
+        String(value || "").trim().toUpperCase() === test.code
+      );
+      if (column < 0) return;
+      scores[test.code] = {
+        score: String(values[row][column] || "").trim(),
+        note: String((notes[row] && notes[row][column]) || "").trim()
+      };
+    });
+
+    rows.push({
+      studentCode: studentCode,
+      name: name,
+      scores: scores
+    });
+  }
+
+  tests.sort((a, b) => {
+    if (a.subjectCode !== b.subjectCode) {
+      return a.subjectCode.localeCompare(b.subjectCode);
+    }
+    return a.number - b.number;
+  });
+
+  return {
+    tests: tests,
+    students: rows
+  };
+}
+
+function saveScoreBookForAdmin(ss, input) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+
+  try {
+    const sheet = ss.getSheetByName("BANG_DIEM_WEB");
+    if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
+
+    const testInput = (input && input.test) || {};
+    const subjectMap = getScoreSubjectMap();
+    const subjectCode = String(testInput.subjectCode || "").trim().toUpperCase();
+    const title = String(testInput.title || "").trim();
+    const date = String(testInput.date || "").trim();
+    let testCode = String(testInput.code || "").trim().toUpperCase();
+
+    if (!subjectMap[subjectCode]) throw new Error("Môn học không hợp lệ.");
+    if (!title) throw new Error("Tên bài kiểm tra không được để trống.");
+    if (!date) throw new Error("Ngày kiểm tra không được để trống.");
+
+    const lastColumn = Math.max(sheet.getLastColumn(), 2);
+    const codes = lastColumn >= 3
+      ? sheet.getRange(3, 3, 1, lastColumn - 2).getDisplayValues()[0]
+      : [];
+    let targetColumn = 0;
+
+    if (testCode) {
+      codes.forEach((value, index) => {
+        if (String(value || "").trim().toUpperCase() === testCode) {
+          targetColumn = index + 3;
+        }
+      });
+      if (!targetColumn) throw new Error("Không tìm thấy bài kiểm tra cần cập nhật.");
+    } else {
+      let nextNumber = 1;
+      codes.forEach(value => {
+        const match = String(value || "").trim().toUpperCase()
+          .match(new RegExp("^" + subjectCode + "_BAI_(\\d+)$"));
+        if (match) nextNumber = Math.max(nextNumber, Number(match[1]) + 1);
+      });
+      testCode = subjectCode + "_BAI_" + String(nextNumber).padStart(2, "0");
+      targetColumn = Math.max(sheet.getLastColumn() + 1, 3);
+    }
+
+    sheet.getRange(3, targetColumn).setNumberFormat("@").setValue(testCode);
+    sheet.getRange(4, targetColumn).setValue(title);
+    sheet.getRange(5, targetColumn).setNumberFormat("@").setValue(date);
+
+    const classStudents = getClassList();
+    const lastRow = Math.max(sheet.getLastRow(), 5);
+    const identityValues = lastRow >= 6
+      ? sheet.getRange(6, 1, lastRow - 5, 2).getDisplayValues()
+      : [];
+    const rowByStudentCode = {};
+
+    identityValues.forEach((row, index) => {
+      const code = normalizeStudentCode(row[0]);
+      if (code) rowByStudentCode[code] = index + 6;
+    });
+
+    classStudents.forEach(student => {
+      const code = normalizeStudentCode(student.studentCode);
+      if (!code || rowByStudentCode[code]) return;
+      const newRow = Math.max(sheet.getLastRow() + 1, 6);
+      writeStudentIdentityRow(sheet, newRow, code, student.name);
+      rowByStudentCode[code] = newRow;
+    });
+
+    const scoreRows = Array.isArray(input && input.scores)
+      ? input.scores
+      : [];
+
+    scoreRows.forEach(item => {
+      const studentCode = normalizeStudentCode(item && item.studentCode);
+      const targetRow = rowByStudentCode[studentCode];
+      if (!studentCode || !targetRow) return;
+
+      const rawScore = String((item && item.score) ?? "").trim().replace(",", ".");
+      const note = String((item && item.note) || "").trim();
+      const cell = sheet.getRange(targetRow, targetColumn);
+
+      if (!rawScore) {
+        cell.clearContent();
+      } else {
+        const score = Number(rawScore);
+        if (!Number.isFinite(score) || score < 0 || score > 10) {
+          throw new Error(
+            'Điểm của học sinh "' + studentCode + '" phải nằm trong khoảng 0 đến 10.'
+          );
+        }
+        cell.setValue(score);
+      }
+      cell.setNote(note);
+    });
+
+    SpreadsheetApp.flush();
+    const scoreBook = readScoreBookForAdmin(ss);
+    scoreBook.selectedTestCode = testCode;
+    return scoreBook;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function readScores(ss, studentCode) {
