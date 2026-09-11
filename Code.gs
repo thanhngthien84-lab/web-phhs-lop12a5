@@ -169,6 +169,18 @@ function doGet(e) {
       );
     }
 
+    if (mode === "homework" || mode === "homework-save") {
+      assertAdminKey(parameters.adminKey);
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (mode === "homework-save") {
+        const result = saveHomework(ss, JSON.parse(String(parameters.homework || "{}")));
+        return output({ ok: true, ...result }, callback);
+      }
+      return output({ ok: true, records: readHomework(ss, ""),
+        students: getClassList().map(s => ({ studentCode: s.studentCode, name: s.name }))
+      }, callback);
+    }
+
     if (mode === "class") {
       assertAdminKey(parameters.adminKey);
 
@@ -1251,7 +1263,8 @@ function getStudentData(lookupCode) {
     student: student,
     scores: readScores(ss, student.studentCode),
     comments: readComments(ss, student.studentCode),
-    attendance: readAttendance(ss, student.studentCode)
+    attendance: readAttendance(ss, student.studentCode),
+    homework: readHomework(ss, student.studentCode)
   };
 }
 
@@ -1815,3 +1828,63 @@ function output(data, callback) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+
+function homeworkHeaders() {
+ return ["Ngay","Mon","MaHS","BaiTap","TrangThai","GhiChu","TrangThaiBanDau","BoSungLuc","CapNhatLuc"];
+}
+
+function readHomework(ss, studentCode) {
+ const sheet=ss.getSheetByName("BTVN");
+ if(!sheet) return [];
+ const values=sheet.getDataRange().getDisplayValues();
+ if(homeworkHeaders().some((h,i)=>String((values[0]||[])[i]||"")!==h)) throw new Error("Sheet BTVN không đúng cấu trúc cột.");
+ const labels={done:"Hoàn thành",missing:"Chưa làm",partial:"Làm chưa đủ",supplemented:"Đã bổ sung"};
+ return values.slice(1).filter(r=>r[2] && (!studentCode || String(r[2])===String(studentCode))).map(r=>({
+ date:r[0],subjectCode:r[1],studentCode:r[2],title:r[3],status:r[4],note:r[5],
+ initialStatus:r[6],supplementedAt:r[7],updatedAt:r[8]
+ })).filter(r=>labels[r.status]).sort((a,b)=>b.date.localeCompare(a.date));
+}
+
+function saveHomework(ss, input) {
+ if(!input||!/^\d{4}-\d{2}-\d{2}$/.test(input.date||"") ||
+    new Date(input.date+"T00:00:00Z").toISOString().slice(0,10)!==input.date) throw new Error("Ngày kiểm tra không hợp lệ.");
+ if(!Object.prototype.hasOwnProperty.call(getScoreSubjectMap(),input.subjectCode)) throw new Error("Môn học không hợp lệ.");
+ if(!Array.isArray(input.records)||!input.records.length||input.records.length>4) throw new Error("Mỗi lượt lưu cần từ 1 đến 4 học sinh.");
+ const title=String(input.title||"").trim();
+ if(title.length>200) throw new Error("Tên bài tập tối đa 200 ký tự.");
+ const lock=LockService.getScriptLock();lock.waitLock(20000);
+ try {
+ const students=new Set(getClassList().map(s=>String(s.studentCode)));
+ const seen=new Set();
+ const records=input.records.map(r=>{
+ const code=String(r.studentCode||"").trim(),status=String(r.status||""),note=String(r.note||"").trim();
+ if(!students.has(code)||seen.has(code)) throw new Error("Mã học sinh không tồn tại hoặc bị trùng.");
+ if(!["done","missing","partial","supplemented"].includes(status)) throw new Error("Trạng thái BTVN không hợp lệ.");
+ if(note.length>500) throw new Error("Ghi chú tối đa 500 ký tự.");
+ seen.add(code);return {code,status,note};
+ });
+ let sheet=ss.getSheetByName("BTVN");
+ let values=[];
+ if(sheet) {
+ values=sheet.getDataRange().getDisplayValues();
+ if(homeworkHeaders().some((h,i)=>String((values[0]||[])[i]||"")!==h)) throw new Error("Sheet BTVN không đúng cấu trúc cột.");
+ }
+ const updates=records.map(r=>{
+ const matches=values.map((v,i)=>({v,i})).filter(x=>x.i>0&&x.v[0]===input.date&&x.v[1]===input.subjectCode&&x.v[2]===r.code);
+ if(matches.length>1)throw new Error("BTVN có bản ghi trùng. Vui lòng kiểm tra Sheet.");
+ const old=matches.length?matches[0].v:null;
+ if(r.status==="supplemented"&&(!old||!["missing","partial","supplemented"].includes(old[4])))throw new Error("Chỉ chọn Đã bổ sung cho học sinh đã ghi nhận Chưa làm hoặc Làm chưa đủ.");
+ const now=new Date().toISOString();
+ const row=[input.date,input.subjectCode,r.code,title,r.status,r.note,old?(old[6]||old[4]):r.status,r.status==="supplemented"?(old[7]||now):"",now];
+ return {row,index:matches.length?matches[0].i+1:0};
+ });
+ if(!sheet){sheet=ss.insertSheet("BTVN");sheet.getRange(1,1,1,9).setValues([homeworkHeaders()]);sheet.setFrozenRows(1);}
+ updates.forEach(u=>{
+ const rowNumber=u.index||sheet.getLastRow()+1;
+ if(rowNumber>sheet.getMaxRows())sheet.insertRowsAfter(sheet.getMaxRows(),rowNumber-sheet.getMaxRows());
+ sheet.getRange(rowNumber,1,1,9).setNumberFormat("@").setValues([u.row.map(v=>/^[=+\-@]/.test(v)?"'"+v:v)]);
+ });
+ SpreadsheetApp.flush();
+ return {savedCount:updates.length};
+ }finally{lock.releaseLock();}
+}
