@@ -158,6 +158,7 @@
             attendanceRecords: {},
             scores: [],
             teacherComments: [],
+            scoreBook: { tests: [], students: [], selectedSubject: 'TOAN', selectedTestCode: '', draftTest: null, loaded: false, loading: false, updatedAt: '' },
             attendanceTab: 'diem-danh',
             
             // --- Cập nhật State cho form Tích điểm mới ---
@@ -200,6 +201,7 @@
         const menuItems = [
             { id: 'tong-quan', icon: 'ph-squares-four', label: 'Trang chủ' },
             { id: 'hoc-sinh', icon: 'ph-users', label: 'Học sinh' },
+            { id: 'diem-hoc-tap', icon: 'ph-chart-line-up', label: 'Điểm học tập' },
             { id: 'thoi-khoa-bieu', icon: 'ph-calendar-list', label: 'Thời khóa biểu' },
             { id: 'so-do-lop', icon: 'ph-grid-four', label: 'Sơ đồ lớp' },
             { id: 'doi-qua', icon: 'ph-gift', label: 'Quà tặng' },
@@ -266,6 +268,10 @@
             if (!state.attendanceRecords) state.attendanceRecords = {};
             if (!state.scores) state.scores = [];
             if (!state.teacherComments) state.teacherComments = [];
+            if (!state.scoreBook) state.scoreBook = { tests: [], students: [], selectedSubject: 'TOAN', selectedTestCode: '', draftTest: null, loaded: false, loading: false, updatedAt: '' };
+            if (!Array.isArray(state.scoreBook.tests)) state.scoreBook.tests = [];
+            if (!Array.isArray(state.scoreBook.students)) state.scoreBook.students = [];
+            if (!state.scoreBook.selectedSubject) state.scoreBook.selectedSubject = 'TOAN';
             if (!state.attendanceTab) state.attendanceTab = 'diem-danh';
             if (!state.students) state.students = [];
             if (!state.timetable) state.timetable = { dayUrl: '', extraUrl: '' };
@@ -373,7 +379,10 @@ window.switchTab = function(tabId) {
     }
     
     state.currentTab = tabId; 
-    renderLayout(); 
+    renderLayout();
+    if (tabId === 'diem-hoc-tap') {
+        setTimeout(function() { loadScoreBookFromGoogle({ silent: true }); }, 0);
+    }
 };
 function renderSidebar() {
     // Lọc menu theo quyền đăng nhập
@@ -518,6 +527,7 @@ window.closeModal = function(id) {
             switch (state.currentTab) {
                 case 'tong-quan': contentHtml = renderViewTongQuan(); break;
                 case 'hoc-sinh': contentHtml = renderViewHocSinh(); break;
+                case 'diem-hoc-tap': contentHtml = renderViewDiemHocTap(); break;
                 case 'thoi-khoa-bieu': contentHtml = renderViewThoiKhoaBieu(); break;
                 case 'so-do-lop': contentHtml = renderViewSoDoLop(); break;
                 case 'lich-bao-giang': contentHtml = renderViewLichBaoGiang(); break;
@@ -954,6 +964,258 @@ window.closeModal = function(id) {
                 </div>
             `;
         }
+function renderViewDiemHocTap() {
+    const book = state.scoreBook || {};
+    const subjects = [
+        { code: "TOAN", label: "Toán" }, { code: "VAN", label: "Văn" },
+        { code: "ANH", label: "Anh" }, { code: "LY", label: "Lý" },
+        { code: "HOA", label: "Hoá" }, { code: "SINH", label: "Sinh" }
+    ];
+    const selectedSubject = book.selectedSubject || "TOAN";
+    const subjectTests = (book.tests || []).filter(function(test) { return test.subjectCode === selectedSubject; });
+    let selectedTest = null;
+    if (book.selectedTestCode === "__new__" && book.draftTest) {
+        selectedTest = book.draftTest;
+    } else {
+        selectedTest = subjectTests.find(function(test) { return test.code === book.selectedTestCode; }) || subjectTests[0] || null;
+        if (selectedTest) book.selectedTestCode = selectedTest.code;
+    }
+
+    const subjectOptions = subjects.map(function(subject) {
+        return '<option value="' + subject.code + '" ' + (subject.code === selectedSubject ? "selected" : "") + ">" + subject.label + "</option>";
+    }).join("");
+    const testOptions = subjectTests.map(function(test) {
+        return '<option value="' + escapeHtmlText(test.code) + '" ' + (selectedTest && selectedTest.code === test.code ? "selected" : "") + ">" +
+            escapeHtmlText(test.title) + (test.date ? " · " + escapeHtmlText(test.date) : "") + "</option>";
+    }).join("");
+
+    const scoreRowsByCode = {};
+    (book.students || []).forEach(function(row) { scoreRowsByCode[String(row.studentCode || "").trim()] = row; });
+    const students = (state.students || []).filter(function(student) { return String(student.studentCode || "").trim(); });
+    const savedScores = [];
+    if (selectedTest && selectedTest.code && selectedTest.code !== "__new__") {
+        students.forEach(function(student) {
+            const row = scoreRowsByCode[String(student.studentCode || "").trim()];
+            const entry = row && row.scores ? row.scores[selectedTest.code] : null;
+            const value = entry ? Number(String(entry.score || "").replace(",", ".")) : NaN;
+            if (Number.isFinite(value)) savedScores.push(value);
+        });
+    }
+    const average = savedScores.length ? savedScores.reduce(function(sum, score) { return sum + score; }, 0) / savedScores.length : null;
+    const highest = savedScores.length ? Math.max.apply(null, savedScores) : null;
+    const belowFive = savedScores.filter(function(score) { return score < 5; }).length;
+    const cards = [
+        ["Đã nhập", savedScores.length + "/" + students.length, "bg-blue-50", "text-blue-700"],
+        ["Điểm TB lớp", average === null ? "--" : average.toFixed(2), "bg-indigo-50", "text-indigo-700"],
+        ["Điểm cao nhất", highest === null ? "--" : String(highest), "bg-emerald-50", "text-emerald-700"],
+        ["Dưới 5", String(belowFive), "bg-rose-50", "text-rose-700"]
+    ].map(function(card) {
+        return '<div class="' + card[2] + ' rounded-2xl px-4 py-3 border border-white"><div class="text-xs font-bold text-slate-500 mb-1">' +
+            card[0] + '</div><div class="text-xl font-black ' + card[3] + '">' + card[1] + '</div></div>';
+    }).join("");
+
+    const rowsHtml = selectedTest ? students.map(function(student, index) {
+        const code = String(student.studentCode || "").trim();
+        const row = scoreRowsByCode[code];
+        const entry = selectedTest.code && row && row.scores ? row.scores[selectedTest.code] : null;
+        const score = entry ? String(entry.score || "") : "";
+        const note = entry ? String(entry.note || "") : "";
+        return '<tr class="score-entry-row border-b border-slate-100 last:border-0">' +
+            '<td class="px-4 py-3 text-center text-sm font-bold text-slate-400">' + (index + 1) + '</td>' +
+            '<td class="px-4 py-3"><div class="font-bold text-slate-800">' + escapeHtmlText(student.name || "Chưa có tên") +
+            '</div><div class="text-xs text-slate-400 mt-0.5">' + escapeHtmlText(code) + '</div></td>' +
+            '<td class="px-4 py-3 w-40"><input data-score-field="score" data-student-code="' + escapeHtmlText(code) +
+            '" value="' + escapeHtmlText(score) + '" inputmode="decimal" onpaste="handleScoreGridPaste(event,' + index +
+            ',0)" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-center font-black text-blue-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="--"></td>' +
+            '<td class="px-4 py-3 min-w-[240px]"><input data-score-field="note" data-student-code="' + escapeHtmlText(code) +
+            '" value="' + escapeHtmlText(note) + '" onpaste="handleScoreGridPaste(event,' + index +
+            ',1)" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="Ghi chú nếu có"></td></tr>';
+    }).join("") : "";
+
+    const loading = Boolean(book.loading);
+    const isDraft = Boolean(selectedTest && selectedTest.code === "__new__");
+    const title = selectedTest ? escapeHtmlText(selectedTest.title || "Bài kiểm tra mới") : "Chưa có bài kiểm tra";
+    const date = selectedTest && selectedTest.date ? escapeHtmlText(selectedTest.date) : "";
+
+    return '<div class="max-w-[1500px] mx-auto space-y-6 animate-fade-in pb-10">' +
+        '<section class="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-7">' +
+        '<div class="flex flex-col xl:flex-row xl:items-end justify-between gap-5"><div class="flex items-center gap-3">' +
+        '<div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="ph-fill ph-chart-line-up text-2xl"></i></div>' +
+        '<div><h2 class="text-2xl md:text-3xl font-black text-slate-800">Điểm học tập</h2><p class="text-sm text-slate-500 font-medium">Nhập nhanh điểm theo bài kiểm tra và lưu trực tiếp lên Google Sheet.</p></div></div>' +
+        '<div class="flex flex-wrap gap-3"><button onclick="openConnectedGoogleSheet()" class="px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm flex items-center gap-2"><i class="ph-bold ph-table"></i> Mở Google Sheet</button>' +
+        '<button onclick="loadScoreBookFromGoogle()" ' + (loading ? "disabled" : "") + ' class="px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center gap-2 disabled:opacity-60"><i class="ph-bold ph-arrows-clockwise ' + (loading ? "animate-spin" : "") + '"></i> Đồng bộ điểm</button>' +
+        '<button onclick="openNewScoreTestModal()" class="px-4 py-3 rounded-xl bg-[#0f172a] text-white font-bold text-sm flex items-center gap-2 shadow-md"><i class="ph-bold ph-plus-circle"></i> Tạo bài kiểm tra</button></div></div>' +
+        '<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[220px_minmax(280px,1fr)_repeat(4,minmax(120px,160px))] gap-3 mt-6 items-stretch">' +
+        '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Môn học</span><select onchange="selectScoreSubject(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700">' + subjectOptions + '</select></label>' +
+        '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Bài kiểm tra</span><select onchange="selectScoreTest(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700" ' + (!subjectTests.length ? "disabled" : "") + '>' +
+        (testOptions || '<option>Chưa có bài kiểm tra</option>') + '</select></label>' + cards + '</div></section>' +
+        (selectedTest
+            ? '<section class="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden"><div class="p-5 md:p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><div class="flex items-center gap-2"><h3 class="text-xl font-black text-slate-800">' + title + '</h3>' +
+              (isDraft ? '<span class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">Bài mới</span>' : "") +
+              '</div><p class="text-sm text-slate-500 mt-1">' + (date || "Chưa chọn ngày") + ' · Dán một cột điểm từ Excel vào ô đầu tiên để điền nhanh.</p></div>' +
+              '<button id="save-score-book-button" onclick="saveScoreBook()" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black shadow-md flex items-center justify-center gap-2"><i class="ph-bold ph-cloud-arrow-up"></i> Lưu điểm lên Sheet</button></div>' +
+              '<div class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3 text-center w-16">STT</th><th class="px-4 py-3 text-left">Học sinh</th><th class="px-4 py-3 text-center">Điểm</th><th class="px-4 py-3 text-left">Ghi chú</th></tr></thead><tbody>' +
+              (rowsHtml || '<tr><td colspan="4" class="p-12 text-center text-slate-400 font-bold">Chưa có học sinh để nhập điểm.</td></tr>') + '</tbody></table></div></section>'
+            : '<section class="bg-white rounded-[2rem] border-2 border-dashed border-slate-200 p-12 text-center"><div class="w-16 h-16 mx-auto rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-4"><i class="ph-fill ph-exam text-3xl"></i></div><h3 class="text-lg font-black text-slate-700">Chưa có bài kiểm tra môn này</h3><p class="text-sm text-slate-500 mt-1 mb-5">Tạo bài kiểm tra đầu tiên để bắt đầu nhập điểm.</p><button onclick="openNewScoreTestModal()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold">Tạo bài kiểm tra</button></section>') +
+        '</div>';
+}
+
+function requestScoreBookGoogle(mode, params) {
+    return new Promise(function(resolve, reject) {
+        const callbackName = "googleScoreBookCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+        const script = document.createElement("script");
+        let finished = false;
+        const timeout = setTimeout(function() { finish({ ok: false, message: "Hệ thống phản hồi chậm khi xử lý dữ liệu điểm." }); }, 30000);
+        function cleanup() { clearTimeout(timeout); delete window[callbackName]; script.remove(); }
+        function finish(response) {
+            if (finished) return;
+            finished = true; cleanup();
+            if (!response || !response.ok || !response.scoreBook) {
+                if (response && response.message === "Mã quản trị không chính xác.") clearGoogleAdminKey();
+                reject(new Error((response && response.message) || "Không thể xử lý dữ liệu điểm.")); return;
+            }
+            resolve(response);
+        }
+        window[callbackName] = finish;
+        script.onerror = function() { finish({ ok: false, message: "Không thể kết nối Google Sheet." }); };
+        const query = Object.keys(params || {}).map(function(key) { return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]); }).join("&");
+        script.src = GOOGLE_SHEET_API_URL + "?mode=" + encodeURIComponent(mode) + (query ? "&" + query : "") + "&callback=" + callbackName;
+        document.head.appendChild(script);
+    });
+}
+
+window.loadScoreBookFromGoogle = function loadScoreBookFromGoogle(options) {
+    options = options || {};
+    if (state.scoreBook && state.scoreBook.loading) return;
+    if (options.silent && state.scoreBook && state.scoreBook.loaded) return;
+    const adminKey = getGoogleAdminKey();
+    if (!adminKey) return;
+    state.scoreBook.loading = true;
+    if (state.currentTab === "diem-hoc-tap") renderLayout();
+    requestScoreBookGoogle("score-book", { adminKey: adminKey }).then(function(response) {
+        const oldSubject = state.scoreBook.selectedSubject || "TOAN";
+        const oldTest = state.scoreBook.selectedTestCode || "";
+        state.scoreBook = response.scoreBook;
+        state.scoreBook.selectedSubject = oldSubject;
+        state.scoreBook.selectedTestCode = (state.scoreBook.tests || []).some(function(test) { return test.code === oldTest; }) ? oldTest : "";
+        state.scoreBook.draftTest = null; state.scoreBook.loaded = true; state.scoreBook.loading = false; state.scoreBook.updatedAt = response.updatedAt || "";
+        rememberGoogleAdminKey(adminKey); saveData();
+        if (state.currentTab === "diem-hoc-tap") renderLayout();
+        if (!options.silent) showToast("Đã đồng bộ dữ liệu điểm từ Google Sheet.", "success");
+    }).catch(function(error) {
+        state.scoreBook.loading = false;
+        if (state.currentTab === "diem-hoc-tap") renderLayout();
+        showToast(error.message || "Không thể tải dữ liệu điểm.", "error");
+    });
+};
+
+window.selectScoreSubject = function selectScoreSubject(subjectCode) {
+    state.scoreBook.selectedSubject = subjectCode; state.scoreBook.selectedTestCode = ""; state.scoreBook.draftTest = null; renderLayout();
+};
+
+window.selectScoreTest = function selectScoreTest(testCode) {
+    state.scoreBook.selectedTestCode = testCode; state.scoreBook.draftTest = null; renderLayout();
+};
+
+window.openNewScoreTestModal = function openNewScoreTestModal() {
+    const subjectCode = (state.scoreBook && state.scoreBook.selectedSubject) || "TOAN";
+    const today = new Date();
+    const dateValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+    document.getElementById("modal-container").innerHTML = `
+        <div id="new-score-test-modal" class="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+            <div class="bg-white rounded-[2rem] shadow-2xl w-full max-w-xl overflow-hidden">
+                <div class="p-6 border-b border-slate-100 flex items-center justify-between">
+                    <div><h3 class="text-xl font-black text-slate-800">Tạo bài kiểm tra</h3><p class="text-sm text-slate-500 mt-1">Sau khi tạo, bạn có thể dán nhanh điểm từ Excel.</p></div>
+                    <button onclick="closeModal('new-score-test-modal')" class="p-2 rounded-xl hover:bg-slate-100"><i class="ph-bold ph-x text-xl"></i></button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <label class="block"><span class="text-sm font-bold text-slate-600">Môn học</span>
+                        <select id="new-score-subject" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold">
+                            <option value="TOAN" ${subjectCode === "TOAN" ? "selected" : ""}>Toán</option>
+                            <option value="VAN" ${subjectCode === "VAN" ? "selected" : ""}>Văn</option>
+                            <option value="ANH" ${subjectCode === "ANH" ? "selected" : ""}>Anh</option>
+                            <option value="LY" ${subjectCode === "LY" ? "selected" : ""}>Lý</option>
+                            <option value="HOA" ${subjectCode === "HOA" ? "selected" : ""}>Hoá</option>
+                            <option value="SINH" ${subjectCode === "SINH" ? "selected" : ""}>Sinh</option>
+                        </select>
+                    </label>
+                    <label class="block"><span class="text-sm font-bold text-slate-600">Tên bài kiểm tra</span><input id="new-score-title" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold" placeholder="Ví dụ: Kiểm tra chương 1"></label>
+                    <label class="block"><span class="text-sm font-bold text-slate-600">Ngày kiểm tra</span><input id="new-score-date" type="date" value="${dateValue}" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold"></label>
+                </div>
+                <div class="p-6 pt-0 flex justify-end gap-3">
+                    <button onclick="closeModal('new-score-test-modal')" class="px-5 py-3 rounded-xl border border-slate-200 font-bold text-slate-600">Hủy</button>
+                    <button onclick="createScoreTestDraft()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-black">Tiếp tục nhập điểm</button>
+                </div>
+            </div>
+        </div>`;
+};
+
+window.createScoreTestDraft = function createScoreTestDraft() {
+    const subjectCode = document.getElementById("new-score-subject").value;
+    const title = document.getElementById("new-score-title").value.trim();
+    const date = document.getElementById("new-score-date").value;
+    if (!title) return showToast("Vui lòng nhập tên bài kiểm tra.", "error");
+    if (!date) return showToast("Vui lòng chọn ngày kiểm tra.", "error");
+    state.scoreBook.selectedSubject = subjectCode; state.scoreBook.selectedTestCode = "__new__";
+    state.scoreBook.draftTest = { code: "__new__", subjectCode: subjectCode, title: title, date: formatDateForDisplay(date) };
+    closeModal("new-score-test-modal"); renderLayout();
+};
+
+window.handleScoreGridPaste = function handleScoreGridPaste(event, startRow, startColumn) {
+    const text = event.clipboardData && event.clipboardData.getData("text");
+    if (!text || (!text.includes("\t") && !/[\r\n]/.test(text))) return;
+    event.preventDefault();
+    const pastedRows = text.replace(/\r/g, "").split("\n").filter(function(line) { return line.length > 0; }).map(function(line) { return line.split("\t"); });
+    const rows = Array.from(document.querySelectorAll(".score-entry-row"));
+    pastedRows.forEach(function(cells, rowOffset) {
+        const row = rows[startRow + rowOffset]; if (!row) return;
+        const fields = ["score", "note"];
+        cells.forEach(function(value, columnOffset) {
+            const field = fields[startColumn + columnOffset]; if (!field) return;
+            const input = row.querySelector('[data-score-field="' + field + '"]');
+            if (input) input.value = String(value || "").trim();
+        });
+    });
+};
+
+window.saveScoreBook = function saveScoreBook() {
+    const book = state.scoreBook || {};
+    const selectedTest = book.selectedTestCode === "__new__" ? book.draftTest : (book.tests || []).find(function(test) { return test.code === book.selectedTestCode; });
+    if (!selectedTest) return showToast("Vui lòng chọn bài kiểm tra.", "error");
+    const adminKey = getGoogleAdminKey(); if (!adminKey) return;
+    const inputs = Array.from(document.querySelectorAll('[data-score-field="score"]'));
+    const scores = []; let invalidStudent = "";
+    inputs.forEach(function(input) {
+        const code = input.dataset.studentCode;
+        const raw = input.value.trim().replace(",", ".");
+        const noteInput = document.querySelector('[data-score-field="note"][data-student-code="' + code + '"]');
+        if (raw) {
+            const value = Number(raw);
+            if (!Number.isFinite(value) || value < 0 || value > 10) {
+                input.classList.add("border-red-400", "bg-red-50"); if (!invalidStudent) invalidStudent = code;
+            } else input.classList.remove("border-red-400", "bg-red-50");
+        }
+        scores.push({ studentCode: code, score: raw, note: noteInput ? noteInput.value.trim() : "" });
+    });
+    if (invalidStudent) return showToast("Điểm phải nằm trong khoảng 0 đến 10. Vui lòng kiểm tra học sinh " + invalidStudent + ".", "error");
+    const button = document.getElementById("save-score-book-button");
+    if (button) { button.disabled = true; button.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin"></i> Đang lưu...'; }
+    requestScoreBookGoogle("score-book-save", { adminKey: adminKey, scoreData: JSON.stringify({
+        test: { code: selectedTest.code === "__new__" ? "" : selectedTest.code, subjectCode: selectedTest.subjectCode, title: selectedTest.title, date: selectedTest.date },
+        scores: scores
+    }) }).then(function(response) {
+        const subjectCode = selectedTest.subjectCode;
+        state.scoreBook = response.scoreBook; state.scoreBook.selectedSubject = subjectCode;
+        state.scoreBook.selectedTestCode = response.scoreBook.selectedTestCode || ""; state.scoreBook.draftTest = null;
+        state.scoreBook.loaded = true; state.scoreBook.loading = false; state.scoreBook.updatedAt = response.updatedAt || "";
+        rememberGoogleAdminKey(adminKey); saveData(); renderLayout();
+        showToast("Đã lưu điểm lên Google Sheet. Trang PHHS sẽ đọc dữ liệu mới.", "success");
+    }).catch(function(error) {
+        if (button && button.isConnected) { button.disabled = false; button.innerHTML = '<i class="ph-bold ph-cloud-arrow-up"></i> Lưu điểm lên Sheet'; }
+        showToast(error.message || "Không thể lưu điểm.", "error");
+    });
+};
+
         function renderViewTichDiem() {
             const pf = state.pointsForm;
             const isAdd = pf.actionType === 'add';
@@ -5283,6 +5545,7 @@ window.openEditGroupModal = function(id) {
                 state.students = response.students.map(mergeStudentFromGoogle);
                 state.scores = [];
                 state.teacherComments = [];
+                if (state.scoreBook) state.scoreBook.loaded = false;
                 rememberGoogleAdminKey(adminKey);
                 window.googleSpreadsheetUrl = String(
                     response.spreadsheetUrl || window.googleSpreadsheetUrl || ""
