@@ -89,6 +89,31 @@ function doGet(e) {
       );
     }
 
+    if (mode === "students-bulk-save") {
+      assertAdminKey(parameters.adminKey);
+
+      let students;
+      try {
+        students = JSON.parse(String(parameters.students || "[]"));
+      } catch (error) {
+        throw new Error("Danh sách học sinh không hợp lệ.");
+      }
+
+      const savedStudents = saveStudentRecordsBulk(
+        SpreadsheetApp.getActiveSpreadsheet(),
+        students
+      );
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          savedCount: savedStudents.length,
+          students: savedStudents
+        },
+        callback
+      );
+    }
+
     if (mode === "lookup-codes-generate") {
       assertAdminKey(parameters.adminKey);
 
@@ -754,6 +779,166 @@ function ensureSheetColumn(sheet, headers, aliases, headerName) {
   sheet.getRange(1, column + 1).setValue(headerName);
   headers.push(normalizeHeader(headerName));
   return column;
+}
+
+function generateRandomStudentCode(usedCodes) {
+  for (let attempt = 0; attempt < 2000; attempt++) {
+    const code = String(Math.floor(Math.random() * 10000000000))
+      .padStart(10, "0");
+    if (!usedCodes.has(code)) return code;
+  }
+  throw new Error("Không thể tạo mã học sinh duy nhất. Vui lòng thử lại.");
+}
+
+function saveStudentRecordsBulk(ss, inputs) {
+  if (!Array.isArray(inputs) || !inputs.length) {
+    throw new Error("Danh sách học sinh đang trống.");
+  }
+  if (inputs.length > 20) {
+    throw new Error("Mỗi lần chỉ được lưu tối đa 20 học sinh.");
+  }
+
+  const students = inputs.map((input, index) => {
+    const name = String((input && input.name) || "").trim();
+    if (!name) {
+      throw new Error("Dòng " + (index + 1) + " chưa có họ tên học sinh.");
+    }
+    const targetScore = String(
+      (input && input.tongDiemMucTieu) || ""
+    ).trim().replace(",", ".");
+    if (targetScore && !isFinite(Number(targetScore))) {
+      throw new Error(
+        "Tổng điểm mục tiêu ở dòng " + (index + 1) + " không hợp lệ."
+      );
+    }
+    return {
+      name: name,
+      parentPhone: normalizePhone(input && input.parentPhone),
+      khoiThi: String((input && input.khoiThi) || "").trim(),
+      tongDiemMucTieu: targetScore
+    };
+  });
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const studentSheet = ss.getSheetByName("HOC_SINH");
+    if (!studentSheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
+    const scoreSheet = ss.getSheetByName("BANG_DIEM_WEB");
+    if (!scoreSheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
+    const commentSheet = ss.getSheetByName("NHAN_XET");
+    if (!commentSheet) throw new Error('Không tìm thấy sheet "NHAN_XET".');
+
+    const currentValues = studentSheet.getDataRange().getDisplayValues();
+    const headers = (currentValues[0] || []).map(normalizeHeader);
+    const idColumn = requireColumn(headers, "mahs", "Mã HS");
+    const nameColumn = requireColumn(headers, "hoten", "Họ tên");
+    const phoneColumn = ensureSheetColumn(
+      studentSheet,
+      headers,
+      ["sdtphhs", "sodienthoaiphhs"],
+      "SDT_PHHS"
+    );
+    const lookupColumn = ensureSheetColumn(
+      studentSheet,
+      headers,
+      ["matracuu", "pinphhs"],
+      "MaTraCuu"
+    );
+    const blockColumn = ensureSheetColumn(
+      studentSheet,
+      headers,
+      ["khoithi"],
+      "KhoiThi"
+    );
+    const goalColumn = ensureSheetColumn(
+      studentSheet,
+      headers,
+      ["tongdiemmuctieu"],
+      "TongDiemMucTieu"
+    );
+    const lastColumn = Math.max(studentSheet.getLastColumn(), headers.length);
+    const usedStudentCodes = new Set();
+    const usedLookupCodes = new Set();
+
+    currentValues.slice(1).forEach(row => {
+      const studentCode = normalizeStudentCode(row[idColumn]);
+      const lookupCode = normalizePhone(row[lookupColumn]);
+      if (studentCode) usedStudentCodes.add(studentCode);
+      if (/^\d{5}$/.test(lookupCode)) usedLookupCodes.add(lookupCode);
+    });
+
+    const savedStudents = students.map(student => {
+      const studentCode = generateRandomStudentCode(usedStudentCodes);
+      const lookupCode = generateRandomLookupCode(usedLookupCodes);
+      usedStudentCodes.add(studentCode);
+      usedLookupCodes.add(lookupCode);
+      return {
+        studentCode: studentCode,
+        name: student.name,
+        parentPhone: student.parentPhone,
+        lookupCode: lookupCode,
+        khoiThi: student.khoiThi,
+        tongDiemMucTieu: student.tongDiemMucTieu
+      };
+    });
+
+    const studentRows = savedStudents.map(student => {
+      const row = new Array(lastColumn).fill("");
+      row[idColumn] = student.studentCode;
+      row[nameColumn] = student.name;
+      row[phoneColumn] = student.parentPhone;
+      row[lookupColumn] = student.lookupCode;
+      row[blockColumn] = student.khoiThi;
+      row[goalColumn] = student.tongDiemMucTieu;
+      return row;
+    });
+    const studentStartRow = Math.max(studentSheet.getLastRow() + 1, 2);
+    studentSheet.getRange(
+      studentStartRow,
+      idColumn + 1,
+      studentRows.length,
+      1
+    ).setNumberFormat("@");
+    studentSheet.getRange(
+      studentStartRow,
+      phoneColumn + 1,
+      studentRows.length,
+      1
+    ).setNumberFormat("@");
+    studentSheet.getRange(
+      studentStartRow,
+      lookupColumn + 1,
+      studentRows.length,
+      1
+    ).setNumberFormat("@");
+    studentSheet.getRange(
+      studentStartRow,
+      1,
+      studentRows.length,
+      lastColumn
+    ).setValues(studentRows);
+
+    const identityRows = savedStudents.map(student => [
+      student.studentCode,
+      student.name
+    ]);
+    const scoreStartRow = Math.max(scoreSheet.getLastRow() + 1, 6);
+    const commentStartRow = Math.max(commentSheet.getLastRow() + 1, 2);
+    scoreSheet.getRange(scoreStartRow, 1, identityRows.length, 1)
+      .setNumberFormat("@");
+    scoreSheet.getRange(scoreStartRow, 1, identityRows.length, 2)
+      .setValues(identityRows);
+    commentSheet.getRange(commentStartRow, 1, identityRows.length, 1)
+      .setNumberFormat("@");
+    commentSheet.getRange(commentStartRow, 1, identityRows.length, 2)
+      .setValues(identityRows);
+
+    SpreadsheetApp.flush();
+    return savedStudents;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function saveStudentRecord(ss, input) {
