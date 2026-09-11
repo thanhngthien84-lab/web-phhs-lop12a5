@@ -935,12 +935,11 @@ window.closeModal = function(id) {
                             </h2>
                             <p class="text-slate-500 text-sm font-medium mt-1">Thông tin chi tiết, vai trò và mục tiêu phấn đấu của các em</p>
                         </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 w-full">
-                            <button onclick="syncClassFromGoogle()" class="w-full px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Tải lại dữ liệu</button>
-                            <button id="generate-lookup-codes-button" onclick="generateMissingLookupCodes()" class="w-full px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-xl text-sm shadow-sm hover:bg-amber-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-key text-lg"></i> Bổ sung mã còn thiếu</button>
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full">
                             <button onclick="openEditStudentModal(null)" class="w-full px-5 py-3 bg-[#0f172a] text-white font-bold rounded-xl text-sm shadow-md hover:bg-black transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-user-plus text-lg"></i> Thêm HS</button>
                             <button onclick="openBulkStudentModal()" class="w-full px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold rounded-xl text-sm shadow-sm hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-rows-plus-bottom text-lg"></i> Nhập nhanh</button>
                             <button onclick="openConnectedGoogleSheet()" class="w-full px-5 py-3 bg-blue-50 text-blue-700 border border-blue-200 font-bold rounded-xl text-sm shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-table text-lg"></i> Mở Google Sheet</button>
+                            <button onclick="syncClassFromGoogle()" class="w-full px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ từ Sheet</button>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 xl:gap-8">
