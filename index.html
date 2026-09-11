@@ -1039,12 +1039,12 @@ function renderViewDiemHocTap() {
 
     return '<div class="max-w-[1500px] mx-auto space-y-6 animate-fade-in pb-10">' +
         '<section class="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-7">' +
-        '<div class="flex flex-col xl:flex-row xl:items-end justify-between gap-5"><div class="flex items-center gap-3">' +
+        '<div class="flex flex-col gap-5"><div class="flex items-center gap-3">' +
         '<div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="ph-fill ph-chart-line-up text-2xl"></i></div>' +
         '<div><h2 class="text-2xl md:text-3xl font-black text-slate-800">Điểm học tập</h2><p class="text-sm text-slate-500 font-medium">Nhập nhanh điểm theo bài kiểm tra và lưu trực tiếp lên Google Sheet.</p></div></div>' +
-        '<div class="flex flex-wrap gap-3"><button onclick="openConnectedGoogleSheet()" class="px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm flex items-center gap-2"><i class="ph-bold ph-table"></i> Mở Google Sheet</button>' +
-        '<button onclick="loadScoreBookFromGoogle()" ' + (loading ? "disabled" : "") + ' class="px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center gap-2 disabled:opacity-60"><i class="ph-bold ph-arrows-clockwise ' + (loading ? "animate-spin" : "") + '"></i> Đồng bộ điểm</button>' +
-        '<button onclick="openNewScoreTestModal()" class="px-4 py-3 rounded-xl bg-[#0f172a] text-white font-bold text-sm flex items-center gap-2 shadow-md"><i class="ph-bold ph-plus-circle"></i> Tạo bài kiểm tra</button></div></div>' +
+        '<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full"><button onclick="openConnectedGoogleSheet()" class="px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm flex items-center justify-center gap-2"><i class="ph-bold ph-table"></i> Mở Google Sheet</button>' +
+        '<button onclick="loadScoreBookFromGoogle()" ' + (loading ? "disabled" : "") + ' class="px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60"><i class="ph-bold ph-arrows-clockwise ' + (loading ? "animate-spin" : "") + '"></i> Tải điểm mới nhất</button>' +
+        '<button onclick="openNewScoreTestModal()" class="px-4 py-3 rounded-xl bg-[#0f172a] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"><i class="ph-bold ph-plus-circle"></i> Tạo bài kiểm tra</button></div></div>' +
         '<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[220px_minmax(280px,1fr)_repeat(4,minmax(120px,160px))] gap-3 mt-6 items-stretch">' +
         '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Môn học</span><select onchange="selectScoreSubject(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700">' + subjectOptions + '</select></label>' +
         '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Bài kiểm tra</span><select onchange="selectScoreTest(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700" ' + (!subjectTests.length ? "disabled" : "") + '>' +
