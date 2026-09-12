@@ -1621,6 +1621,19 @@ function saveWeeklyCommentsForAdmin(ss, payload) {
       sheet.getRange(1, weekColumn).setValue("TUAN_" + weekNumber);
     }
 
+    const normalizedRecords = records.map(record => {
+      const studentCode = canonicalStudentCode(record && record.studentCode, canonicalMap);
+      const key = studentCodeKey(studentCode);
+      if (!studentCode || !studentNames[key]) {
+        throw new Error("Không tìm thấy học sinh có mã " + String(record && record.studentCode || "") + ".");
+      }
+      return {
+        studentCode: studentCode,
+        key: key,
+        text: String(record.text || "").trim().slice(0, 1000)
+      };
+    });
+
     const rowByCode = {};
     const lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
@@ -1632,28 +1645,27 @@ function saveWeeklyCommentsForAdmin(ss, payload) {
       });
     }
 
-    records.forEach(record => {
-      const studentCode = canonicalStudentCode(record && record.studentCode, canonicalMap);
-      const key = studentCodeKey(studentCode);
-      if (!studentCode || !studentNames[key]) {
-        throw new Error("Không tìm thấy học sinh có mã " + String(record && record.studentCode || "") + ".");
+    const newStudents = [];
+    normalizedRecords.forEach(record => {
+      if (!rowByCode[record.key]) {
+        rowByCode[record.key] = lastRow + newStudents.length + 1;
+        newStudents.push([record.studentCode, studentNames[record.key]]);
       }
-      let rowNumber = rowByCode[key];
-      if (!rowNumber) {
-        rowNumber = sheet.getLastRow() + 1;
-        sheet.getRange(rowNumber, 1, 1, 2).setValues([[studentCode, studentNames[key]]]);
-        sheet.getRange(rowNumber, 1).setNumberFormat("@");
-        rowByCode[key] = rowNumber;
-      } else {
-        sheet.getRange(rowNumber, 1, 1, 2).setValues([[studentCode, studentNames[key]]]);
-        sheet.getRange(rowNumber, 1).setNumberFormat("@");
-      }
-      sheet.getRange(rowNumber, weekColumn)
-        .setValue(String(record.text || "").trim().slice(0, 1000));
     });
+    if (newStudents.length) {
+      sheet.getRange(lastRow + 1, 1, newStudents.length, 2).setValues(newStudents);
+      sheet.getRange(lastRow + 1, 1, newStudents.length, 1).setNumberFormat("@");
+    }
+
+    const finalLastRow = Math.max(sheet.getLastRow(), 2);
+    const weekValues = sheet.getRange(2, weekColumn, finalLastRow - 1, 1).getValues();
+    normalizedRecords.forEach(record => {
+      weekValues[rowByCode[record.key] - 2][0] = record.text;
+    });
+    sheet.getRange(2, weekColumn, weekValues.length, 1).setValues(weekValues);
 
     SpreadsheetApp.flush();
-    return readWeeklyCommentsForAdmin(ss);
+    return { savedCount: normalizedRecords.length, weekNumber: weekNumber };
   } finally {
     lock.releaseLock();
   }
@@ -2021,4 +2033,5 @@ function saveHomework(ss, input) {
  return {savedCount:updates.length};
  }finally{lock.releaseLock();}
 }
+
 
