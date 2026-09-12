@@ -1,6 +1,61 @@
 <!DOCTYPE html>
 <html lang="vi">
-<head>
+<!-- ĐOẠN MÃ TỰ ĐỘNG CHUYỂN ĐỔI SHEET CHO HỆ THỐNG SAAS -->
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentSheetId = urlParams.get('sheetId') || '';
+
+        window.googleSpreadsheetUrl = currentSheetId 
+            ? `https://docs.google.com/spreadsheets/d/${currentSheetId}/edit` 
+            : "";
+
+        const BASE_GOOGLE_API = "https://script.google.com/macros/s/AKfycbwKehnwOgmJGgSMMJiT10bDKZhc58nAKRnjOvoDCe7jvNGKJlnnpJhIUgYsWx8BJcFgDw/exec";
+
+        function getApiUrl(queryString = "") {
+            const sep = BASE_GOOGLE_API.includes("?") ? "&" : "?";
+            let full = BASE_GOOGLE_API + sep;
+            if (currentSheetId) {
+                full += "sheetId=" + encodeURIComponent(currentSheetId) + "&";
+            }
+            if (queryString.startsWith("&") || queryString.startsWith("?")) {
+                queryString = queryString.substring(1);
+            }
+            return full + queryString;
+        }
+
+        const GOOGLE_SHEET_API_URL = getApiUrl();
+
+        // Tự động bọc mọi thẻ script gọi API để luôn đính kèm sheetId
+        const originalCreateElement = document.createElement;
+        document.createElement = function(tagName) {
+            const el = originalCreateElement.call(document, tagName);
+            if (tagName.toLowerCase() === 'script') {
+                const originalSetAttribute = el.setAttribute;
+                el.setAttribute = function(name, value) {
+                    if (name === 'src' && value && value.includes('script.google.com') && !value.includes('sheetId=') && currentSheetId) {
+                        const separator = value.includes('?') ? '&' : '?';
+                        value = value + separator + 'sheetId=' + encodeURIComponent(currentSheetId);
+                    }
+                    return originalSetAttribute.call(this, name, value);
+                };
+                Object.defineProperty(el, 'src', {
+                    set(value) {
+                        if (value && value.includes('script.google.com') && !value.includes('sheetId=') && currentSheetId) {
+                            const separator = value.includes('?') ? '&' : '?';
+                            value = value + separator + 'sheetId=' + encodeURIComponent(currentSheetId);
+                        }
+                        el.setAttribute('src', value);
+                    },
+                    get() {
+                        return el.getAttribute('src');
+                    }
+                });
+            }
+            return el;
+        };
+    </script>
+</head>
+    <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>THANH XUÂN</title>
@@ -130,66 +185,6 @@
             .print\:hidden { display: none !important; }
         }
     </style>
-<!-- ĐOẠN MÃ TỰ ĐỘNG CHUYỂN ĐỔI SHEET CHO HỆ THỐNG SAAS -->
-    <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        const currentSheetId = urlParams.get('sheetId') || '';
-
-        // Tự động gán link mở Google Sheet theo tài khoản giáo viên đăng nhập
-        window.googleSpreadsheetUrl = currentSheetId 
-            ? `https://docs.google.com/spreadsheets/d/${currentSheetId}/edit` 
-            : "";
-
-        const BASE_GOOGLE_API = "https://script.google.com/macros/s/AKfycbwKehnwOgmJGgSMMJiT10bDKZhc58nAKRnjOvoDCe7jvNGKJlnnpJhIUgYsWx8BJcFgDw/exec";
-
-        // Hàm tự động nhúng sheetId vào tất cả các yêu cầu gửi lên Google Apps Script
-        function getApiUrl(queryString = "") {
-            const sep = BASE_GOOGLE_API.includes("?") ? "&" : "?";
-            let full = BASE_GOOGLE_API + sep;
-            if (currentSheetId) {
-                full += "sheetId=" + encodeURIComponent(currentSheetId) + "&";
-            }
-            if (queryString.startsWith("&") || queryString.startsWith("?")) {
-                queryString = queryString.substring(1);
-            }
-            return full + queryString;
-        }
-
-        // Tự động ghi đè đường dẫn API gốc thành đường dẫn đa luồng thông minh
-        const GOOGLE_SHEET_API_URL = getApiUrl();
-
-        // Chặn các hàm fetch/script truyền thống thiếu sheetId và tự động bọc lại
-        const originalCreateElement = document.createElement;
-        document.createElement = function(tagName) {
-            const el = originalCreateElement.call(document, tagName);
-            if (tagName.toLowerCase() === 'script') {
-                const originalSetAttribute = el.setAttribute;
-                el.setAttribute = function(name, value) {
-                    if (name === 'src' && value && value.includes('script.google.com') && !value.includes('sheetId=') && currentSheetId) {
-                        const separator = value.includes('?') ? '&' : '?';
-                        value = value + separator + 'sheetId=' + encodeURIComponent(currentSheetId);
-                    }
-                    return originalSetAttribute.call(this, name, value);
-                };
-                Object.defineProperty(el, 'src', {
-                    set(value) {
-                        if (value && value.includes('script.google.com') && !value.includes('sheetId=') && currentSheetId) {
-                            const separator = value.includes('?') ? '&' : '?';
-                            value = value + separator + 'sheetId=' + encodeURIComponent(currentSheetId);
-                        }
-                        el.setAttribute('src', value);
-                    },
-                    get() {
-                        return el.getAttribute('src');
-                    }
-                });
-            }
-            return el;
-        };
-    </script>
-</head>
-    
-    
 </head>
 <body>
     <!-- App Mount Points -->
