@@ -68,9 +68,32 @@ async function api(url,options={}){const response=await fetch(url,{...options,he
 function initGoogle(){if(!window.google||!google.accounts){status('loginStatus','Thư viện đăng nhập Google chưa tải xong. Hãy thử lại sau ít giây.','error');return false;}tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:OAUTH_SCOPE,callback:onToken,error_callback:()=>status('loginStatus','Cửa sổ đăng nhập đã đóng hoặc không thể mở.','error')});return true;}
 function login(){if(busy)return;if(!tokenClient&&!initGoogle())return;status('loginStatus','');tokenClient.requestAccessToken({prompt:'select_account'});}
 async function onToken(result){if(result.error){status('loginStatus','Không thể đăng nhập: '+result.error,'error');return;}accessToken=result.access_token;setBusy($('loginBtn'),true,'Đang kiểm tra dữ liệu…');try{profile=await api('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{}});await findWorkbook();}catch(error){status('loginStatus',error.message,'error');}finally{setBusy($('loginBtn'),false,'');}}
-async function findWorkbook(){const q="trashed = false and mimeType = 'application/vnd.google-apps.spreadsheet' and appProperties has { key='"+APP_MARKER.key+"' and value='"+APP_MARKER.value+"' }";const params=new URLSearchParams({q,spaces:'drive',fields:'files(id,name,webViewLink)',pageSize:'10'});const data=await api('https://www.googleapis.com/drive/v3/files?'+params);workbook=(data.files||[])[0]||null;if(workbook)renderDashboard();else show('setup');}
+async function findWorkbook(){const q="trashed = false and mimeType = 'application/vnd.google-apps.spreadsheet' and appProperties has { key='"+APP_MARKER.key+"' and value='"+APP_MARKER.value+"' }";const params=new URLSearchParams({q,spaces:'drive',fields:'files(id,name,webViewLink,createdTime)',orderBy:'createdTime desc',pageSize:'10'});const data=await api('https://www.googleapis.com/drive/v3/files?'+params);workbook=(data.files||[])[0]||null;if(workbook){await prepareWorkbook(workbook.id,classNameFromWorkbook(workbook.name));renderDashboard();}else show('setup');}
 async function createWorkbook(){const name=$('className').value.trim();if(name.length<2){status('setupStatus','Vui lòng nhập tên lớp.','error');return;}setBusy($('createBtn'),true,'Đang tạo file…');status('setupStatus','');try{const file=await api('https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink',{method:'POST',body:JSON.stringify({name:'Cổng PHHS - '+name,mimeType:'application/vnd.google-apps.spreadsheet',appProperties:{[APP_MARKER.key]:APP_MARKER.value}})});await prepareWorkbook(file.id,name);workbook=file;renderDashboard();}catch(error){status('setupStatus',error.message,'error');}finally{setBusy($('createBtn'),false,'');}}
-async function prepareWorkbook(id,className){const info=await api('https://sheets.googleapis.com/v4/spreadsheets/'+id+'?fields=sheets.properties');const first=info.sheets[0].properties.sheetId;const requests=[{updateSheetProperties:{properties:{sheetId:first,title:SHEETS[0][0],gridProperties:{frozenRowCount:1}},fields:'title,gridProperties.frozenRowCount'}}];SHEETS.slice(1).forEach(([title])=>requests.push({addSheet:{properties:{title,gridProperties:{frozenRowCount:1}}}}));await api('https://sheets.googleapis.com/v4/spreadsheets/'+id+':batchUpdate',{method:'POST',body:JSON.stringify({requests})});const data=SHEETS.map(([title,headers])=>({range:"'"+title+"'!A1",majorDimension:'ROWS',values:[headers]}));data.push({range:"'CAI_DAT_WEB'!A2",majorDimension:'ROWS',values:[['TEN_LOP',className],['PHIEN_BAN','1']]});await api('https://sheets.googleapis.com/v4/spreadsheets/'+id+'/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'RAW',data})});}
+function classNameFromWorkbook(name){return String(name||'').replace(/^Cổng PHHS\s*-\s*/i,'').trim()||'Lớp học';}
+async function prepareWorkbook(id,className){
+  const info=await api('https://sheets.googleapis.com/v4/spreadsheets/'+id+'?fields=sheets.properties');
+  const existing=(info.sheets||[]).map(sheet=>sheet.properties);
+  const titles=new Set(existing.map(sheet=>sheet.title));
+  const requests=[];
+  if(!titles.has(SHEETS[0][0])&&existing.length===1){
+    requests.push({updateSheetProperties:{properties:{sheetId:existing[0].sheetId,title:SHEETS[0][0],gridProperties:{frozenRowCount:1}},fields:'title,gridProperties.frozenRowCount'}});
+    titles.add(SHEETS[0][0]);
+  }
+  SHEETS.forEach(([title])=>{
+    if(!titles.has(title)){
+      requests.push({addSheet:{properties:{title,gridProperties:{frozenRowCount:1}}}});
+      titles.add(title);
+    }
+  });
+  existing.forEach(sheet=>{
+    if(SHEETS.some(([title])=>title===sheet.title))requests.push({updateSheetProperties:{properties:{sheetId:sheet.sheetId,gridProperties:{frozenRowCount:1}},fields:'gridProperties.frozenRowCount'}});
+  });
+  if(requests.length)await api('https://sheets.googleapis.com/v4/spreadsheets/'+id+':batchUpdate',{method:'POST',body:JSON.stringify({requests})});
+  const data=SHEETS.map(([title,headers])=>({range:"'"+title+"'!A1",majorDimension:'ROWS',values:[headers]}));
+  data.push({range:"'CAI_DAT_WEB'!A2",majorDimension:'ROWS',values:[['TEN_LOP',className],['PHIEN_BAN','1']]});
+  await api('https://sheets.googleapis.com/v4/spreadsheets/'+id+'/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'RAW',data})});
+}
 function renderDashboard(){show('dashboard');$('displayName').textContent=profile&&profile.name||'Giáo viên';$('displayEmail').textContent=profile&&profile.email||'';$('avatar').textContent=(profile&&profile.name||'GV').split(/\s+/).slice(-1)[0].slice(0,2).toUpperCase();$('sheetName').textContent=workbook.name;$('openSheet').href=workbook.webViewLink||('https://docs.google.com/spreadsheets/d/'+workbook.id+'/edit');}
 function logout(){const token=accessToken;accessToken='';profile=null;workbook=null;if(token&&window.google)google.accounts.oauth2.revoke(token,()=>{});show('login');status('loginStatus','Đã đăng xuất khỏi phiên làm việc.');}
 $('loginBtn').addEventListener('click',login);$('createBtn').addEventListener('click',createWorkbook);$('logoutBtn').addEventListener('click',logout);$('refreshBtn').addEventListener('click',async()=>{if(busy)return;setBusy($('refreshBtn'),true,'Đang kiểm tra…');try{await findWorkbook();}catch(e){alert(e.message);}finally{setBusy($('refreshBtn'),false,'');}});
