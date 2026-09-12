@@ -1002,7 +1002,7 @@ function renderViewDiemHocTap(){
 }
 
 function weeklyCommentUI(){
- if(!window.weeklyCommentsUI)window.weeklyCommentsUI={weekNumber:1,weeks:[],students:[],records:[],draft:{},loaded:false,busy:false,dirty:false};
+ if(!window.weeklyCommentsUI)window.weeklyCommentsUI={weekNumber:1,weeks:[],students:[],records:[],draft:{},touched:{},loaded:false,busy:false,dirty:false};
  return window.weeklyCommentsUI;
 }
 
@@ -1023,7 +1023,7 @@ function weeklyCommentRequest(mode,params){
 }
 
 function prepareWeeklyCommentDraft(){
- const c=weeklyCommentUI();c.draft={};
+ const c=weeklyCommentUI();c.draft={};c.touched={};
  c.students.forEach(s=>{c.draft[s.studentCode]="";});
  c.records.filter(r=>Number(r.weekNumber)===Number(c.weekNumber)).forEach(r=>{c.draft[r.studentCode]=r.text||"";});
  c.dirty=false;
@@ -1052,7 +1052,7 @@ function changeWeeklyCommentWeek(value){
 function editWeeklyComment(index,value){
  const c=weeklyCommentUI();if(c.busy)return;
  const student=c.students[index];if(!student)return;
- c.draft[student.studentCode]=String(value||"").slice(0,1000);c.dirty=true;
+ c.draft[student.studentCode]=String(value||"").slice(0,1000);c.touched[student.studentCode]=true;c.dirty=true;
  const count=document.getElementById("weekly-comment-count");
  if(count)count.textContent=Object.values(c.draft).filter(x=>String(x).trim()).length+"/"+c.students.length+" học sinh có nhận xét";
 }
@@ -1064,8 +1064,11 @@ function pasteWeeklyComments(event,startIndex){
  const c=weeklyCommentUI(),lines=text.replace(/\r/g,"").split("\n");
  if(lines.length&&lines[lines.length-1]==="")lines.pop();
  lines.forEach((line,offset)=>{
-  const student=c.students[startIndex+offset];
-  if(student)c.draft[student.studentCode]=line.trim().slice(0,1000);
+ const student=c.students[startIndex+offset];
+  if(student){
+   c.draft[student.studentCode]=line.trim().slice(0,1000);
+   c.touched[student.studentCode]=true;
+  }
  });
  c.dirty=true;renderLayout();
 }
@@ -1098,14 +1101,15 @@ async function saveWeeklyCommentsUI(){
  const c=weeklyCommentUI();if(c.busy||!c.loaded)return;
  if(!c.students.length)return showToast("Chưa có học sinh để lưu nhận xét.","error");
  const key=getGoogleAdminKey();if(!key)return;
- const records=c.students.map(s=>({studentCode:s.studentCode,text:c.draft[s.studentCode]||""}));
+ const records=c.students.filter(s=>c.touched[s.studentCode]).map(s=>({studentCode:s.studentCode,text:c.draft[s.studentCode]||""}));
+ if(!records.length)return showToast("Bạn chưa thay đổi nhận xét nào.","error");
  const input={weekNumber:c.weekNumber,records:[]};
  c.busy=true;renderLayout();let saved=0;
  try{
   let batch=[];const batches=[];
   for(const record of records){
    const test=[...batch,record];
-   if(batch.length&&(test.length>4||encodeURIComponent(JSON.stringify({...input,records:test})).length>6000)){batches.push(batch);batch=[];}
+   if(batch.length&&encodeURIComponent(JSON.stringify({...input,records:test})).length>6000){batches.push(batch);batch=[];}
    batch.push(record);
   }
   if(batch.length)batches.push(batch);
@@ -1113,8 +1117,11 @@ async function saveWeeklyCommentsUI(){
    await weeklyCommentRequest("weekly-comments-save",{adminKey:key,commentData:JSON.stringify({...input,records:items})});
    saved+=items.length;
   }
-  const fresh=await weeklyCommentRequest("weekly-comments",{adminKey:key});
-  c.records=fresh.comments||[];c.students=fresh.students||[];c.weeks=fresh.weeks||[];prepareWeeklyCommentDraft();
+  const changedCodes=new Set(records.map(record=>String(record.studentCode)));
+  c.records=c.records.filter(record=>Number(record.weekNumber)!==Number(c.weekNumber)||!changedCodes.has(String(record.studentCode)));
+  records.filter(record=>String(record.text||"").trim()).forEach(record=>c.records.push({studentCode:record.studentCode,weekNumber:c.weekNumber,text:String(record.text).trim()}));
+  if(!c.weeks.map(Number).includes(Number(c.weekNumber)))c.weeks.push(Number(c.weekNumber));
+  prepareWeeklyCommentDraft();
   rememberGoogleAdminKey(key);showToast("Đã lưu nhận xét tuần "+c.weekNumber+" cho "+saved+" học sinh.","success");
  }catch(e){showToast("Đã xác nhận lưu "+saved+"/"+records.length+" học sinh. "+e.message,"error");}
  finally{c.busy=false;renderLayout();}
@@ -8389,4 +8396,5 @@ window.deleteHistoryRecord = function(studentId, historyId) {
     </script>
 </body>
 </html>
+
 
