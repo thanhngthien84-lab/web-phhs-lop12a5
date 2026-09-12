@@ -981,18 +981,144 @@ function homeworkStatusLabels(){return {done:"Hoàn thành",missing:"Chưa làm"
 
 function homeworkTabs() {
  const active=window.learningSection||"scores";
- return '<div class="flex gap-2 mb-5" role="group" aria-label="Nội dung học tập">'+[["scores","Điểm kiểm tra"],["homework","BTVN"]].map(x=>'<button onclick="changeLearningSection(\''+x[0]+'\')" class="px-5 py-3 rounded-xl font-bold '+(active===x[0]?'bg-indigo-600 text-white':'bg-white border border-slate-200 text-slate-600')+'">'+x[1]+'</button>').join("")+'</div>';
+ return '<div class="flex flex-wrap gap-2 mb-5" role="group" aria-label="Nội dung học tập">'+[["scores","Điểm kiểm tra"],["homework","BTVN"],["comments","Nhận xét tuần"]].map(x=>'<button onclick="changeLearningSection(\''+x[0]+'\')" class="px-5 py-3 rounded-xl font-bold '+(active===x[0]?'bg-indigo-600 text-white':'bg-white border border-slate-200 text-slate-600')+'">'+x[1]+'</button>').join("")+'</div>';
 }
 
 function changeLearningSection(section) {
- if(homeworkUI().busy)return;
- if(homeworkUI().dirty&&!confirm("BTVN chưa lưu. Bạn muốn bỏ phần đang sửa?"))return;
- prepareHomeworkDraft();
+ const h=homeworkUI(),c=weeklyCommentUI();
+ if(h.busy||c.busy)return;
+ if(window.learningSection==="homework"&&h.dirty&&!confirm("BTVN chưa lưu. Bạn muốn bỏ phần đang sửa?"))return;
+ if(window.learningSection==="comments"&&c.dirty&&!confirm("Nhận xét tuần chưa lưu. Bạn muốn bỏ phần đang sửa?"))return;
+ if(window.learningSection==="homework")prepareHomeworkDraft();
+ if(window.learningSection==="comments")prepareWeeklyCommentDraft();
  window.learningSection=section;renderLayout();
- if(section==="homework"&&!homeworkUI().loaded)loadHomework();
+ if(section==="homework"&&!h.loaded)loadHomework();
+ if(section==="comments"&&!c.loaded)loadWeeklyComments();
 }
 
-function renderViewDiemHocTap(){return homeworkTabs()+(window.learningSection==="homework"?renderHomework():renderViewScoreEntry());}
+function renderViewDiemHocTap(){
+ const section=window.learningSection||"scores";
+ return homeworkTabs()+(section==="homework"?renderHomework():section==="comments"?renderWeeklyComments():renderViewScoreEntry());
+}
+
+function weeklyCommentUI(){
+ if(!window.weeklyCommentsUI)window.weeklyCommentsUI={weekNumber:1,weeks:[],students:[],records:[],draft:{},loaded:false,busy:false,dirty:false};
+ return window.weeklyCommentsUI;
+}
+
+function weeklyCommentRequest(mode,params){
+ return new Promise((resolve,reject)=>{
+ const callback="wc_"+Date.now()+"_"+Math.floor(Math.random()*1e8),script=document.createElement("script");
+ let finished=false;
+ const timer=setTimeout(()=>finish(null),35000);
+ function finish(r){
+  if(finished)return;finished=true;clearTimeout(timer);script.remove();
+  window[callback]=()=>{};setTimeout(()=>delete window[callback],60000);
+  if(!r||!r.ok){reject(new Error(r&&r.message||"Chưa nhận được phản hồi từ Google Sheet. Hãy kiểm tra kết nối rồi thử lại."));return;}
+  resolve(r);
+ }
+ window[callback]=finish;script.onerror=()=>finish(null);
+ script.src=GOOGLE_SHEET_API_URL+"?"+new URLSearchParams({mode,...params,callback});document.head.appendChild(script);
+ });
+}
+
+function prepareWeeklyCommentDraft(){
+ const c=weeklyCommentUI();c.draft={};
+ c.students.forEach(s=>{c.draft[s.studentCode]="";});
+ c.records.filter(r=>Number(r.weekNumber)===Number(c.weekNumber)).forEach(r=>{c.draft[r.studentCode]=r.text||"";});
+ c.dirty=false;
+}
+
+async function loadWeeklyComments(){
+ const c=weeklyCommentUI();if(c.busy)return;
+ if(c.dirty&&!confirm("Tải lại sẽ bỏ nhận xét tuần chưa lưu. Tiếp tục?"))return;
+ const key=getGoogleAdminKey();if(!key)return;
+ c.busy=true;renderLayout();
+ try{
+  const r=await weeklyCommentRequest("weekly-comments",{adminKey:key});
+  c.records=r.comments||[];c.students=r.students||[];c.weeks=r.weeks||[];
+  if(!c.loaded)c.weekNumber=c.weeks.length?Math.max(...c.weeks.map(Number)):1;
+  c.loaded=true;prepareWeeklyCommentDraft();rememberGoogleAdminKey(key);
+ }catch(e){showToast(e.message,"error");}
+ finally{c.busy=false;if(window.learningSection==="comments")renderLayout();}
+}
+
+function changeWeeklyCommentWeek(value){
+ const c=weeklyCommentUI();if(c.busy)return;
+ if(c.dirty&&!confirm("Nhận xét tuần chưa lưu. Bỏ phần đang sửa để chuyển tuần?")){renderLayout();return;}
+ c.weekNumber=Math.max(1,Math.min(99,Number(value)||1));prepareWeeklyCommentDraft();renderLayout();
+}
+
+function editWeeklyComment(index,value){
+ const c=weeklyCommentUI();if(c.busy)return;
+ const student=c.students[index];if(!student)return;
+ c.draft[student.studentCode]=String(value||"").slice(0,1000);c.dirty=true;
+ const count=document.getElementById("weekly-comment-count");
+ if(count)count.textContent=Object.values(c.draft).filter(x=>String(x).trim()).length+"/"+c.students.length+" học sinh có nhận xét";
+}
+
+function pasteWeeklyComments(event,startIndex){
+ const text=event.clipboardData&&event.clipboardData.getData("text");
+ if(!text||!text.includes("\n"))return;
+ event.preventDefault();
+ const c=weeklyCommentUI(),lines=text.replace(/\r/g,"").split("\n");
+ if(lines.length&&lines[lines.length-1]==="")lines.pop();
+ lines.forEach((line,offset)=>{
+  const student=c.students[startIndex+offset];
+  if(student)c.draft[student.studentCode]=line.trim().slice(0,1000);
+ });
+ c.dirty=true;renderLayout();
+}
+
+function renderWeeklyComments(){
+ const c=weeklyCommentUI(),esc=escapeHtmlText,disabled=c.busy?"disabled":"";
+ const button="px-4 py-3 rounded-xl border font-bold disabled:opacity-50";
+ const filled=Object.values(c.draft).filter(x=>String(x).trim()).length;
+ return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 space-y-5">
+ <div><h2 class="font-black text-2xl">Nhận xét học sinh theo tuần</h2><p class="text-slate-500 mt-1">Nhập trực tiếp hoặc dán một cột nhận xét từ Excel/Google Sheet.</p></div>
+ <div class="flex flex-wrap gap-3">
+  <button ${disabled} onclick="loadWeeklyComments()" class="${button} text-emerald-700">Tải nhận xét mới nhất</button>
+  <button ${disabled} onclick="openConnectedGoogleSheet()" class="${button} text-blue-700">Mở Google Sheet</button>
+  <button ${disabled} onclick="saveWeeklyCommentsUI()" class="${button} bg-indigo-600 text-white">${c.busy?"Đang lưu…":"Lưu nhận xét"}</button>
+ </div>
+ ${!c.loaded?'<p class="text-slate-500">'+(c.busy?"Đang tải nhận xét…":"Bấm Tải nhận xét mới nhất để lấy danh sách học sinh.")+'</p>':`
+ <fieldset ${disabled} class="space-y-5">
+  <div class="grid sm:grid-cols-[220px_1fr] gap-4 items-end">
+   <label class="font-bold">Tuần<input aria-label="Số tuần nhận xét" type="number" min="1" max="99" value="${c.weekNumber}" onchange="changeWeeklyCommentWeek(this.value)" class="block mt-2 w-full border rounded-xl p-3"></label>
+   <div><p id="weekly-comment-count" class="font-bold text-indigo-700">${filled}/${c.students.length} học sinh có nhận xét</p><p class="text-sm text-slate-500 mt-1">Dán cả một cột vào ô đầu tiên để điền nhanh theo đúng thứ tự danh sách.</p></div>
+  </div>
+  <div class="overflow-x-auto border rounded-2xl"><table class="w-full min-w-[760px] text-sm">
+   <thead class="bg-slate-50"><tr><th class="p-3 text-left w-16">STT</th><th class="p-3 text-left w-64">Học sinh</th><th class="p-3 text-left">Nhận xét tuần ${c.weekNumber}</th></tr></thead>
+   <tbody>${c.students.map((s,i)=>`<tr class="border-t border-slate-100"><td class="p-3 text-slate-500">${i+1}</td><td class="p-3"><div class="font-bold">${esc(s.name)}</div><div class="text-xs text-slate-500">${esc(s.studentCode)}</div></td><td class="p-3"><textarea aria-label="Nhận xét ${esc(s.name)}" maxlength="1000" rows="2" oninput="editWeeklyComment(${i},this.value)" onpaste="pasteWeeklyComments(event,${i})" class="w-full border rounded-xl p-3 resize-y" placeholder="Nhập nhận xét cho học sinh">${esc(c.draft[s.studentCode]||"")}</textarea></td></tr>`).join("")||'<tr><td colspan="3" class="p-5 text-slate-500">Chưa có học sinh trong Sheet.</td></tr>'}</tbody>
+  </table></div>
+ </fieldset>`}</section>`;
+}
+
+async function saveWeeklyCommentsUI(){
+ const c=weeklyCommentUI();if(c.busy||!c.loaded)return;
+ if(!c.students.length)return showToast("Chưa có học sinh để lưu nhận xét.","error");
+ const key=getGoogleAdminKey();if(!key)return;
+ const records=c.students.map(s=>({studentCode:s.studentCode,text:c.draft[s.studentCode]||""}));
+ const input={weekNumber:c.weekNumber,records:[]};
+ c.busy=true;renderLayout();let saved=0;
+ try{
+  let batch=[];const batches=[];
+  for(const record of records){
+   const test=[...batch,record];
+   if(batch.length&&(test.length>4||encodeURIComponent(JSON.stringify({...input,records:test})).length>6000)){batches.push(batch);batch=[];}
+   batch.push(record);
+  }
+  if(batch.length)batches.push(batch);
+  for(const items of batches){
+   await weeklyCommentRequest("weekly-comments-save",{adminKey:key,commentData:JSON.stringify({...input,records:items})});
+   saved+=items.length;
+  }
+  const fresh=await weeklyCommentRequest("weekly-comments",{adminKey:key});
+  c.records=fresh.comments||[];c.students=fresh.students||[];c.weeks=fresh.weeks||[];prepareWeeklyCommentDraft();
+  rememberGoogleAdminKey(key);showToast("Đã lưu nhận xét tuần "+c.weekNumber+" cho "+saved+" học sinh.","success");
+ }catch(e){showToast("Đã xác nhận lưu "+saved+"/"+records.length+" học sinh. "+e.message,"error");}
+ finally{c.busy=false;renderLayout();}
+}
 
 function homeworkRequest(mode,params) {
  return new Promise((resolve,reject)=>{
@@ -8263,3 +8389,4 @@ window.deleteHistoryRecord = function(studentId, historyId) {
     </script>
 </body>
 </html>
+
