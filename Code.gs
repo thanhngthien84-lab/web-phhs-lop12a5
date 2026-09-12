@@ -181,6 +181,19 @@ function doGet(e) {
       }, callback);
     }
 
+    if (mode === "weekly-comments" || mode === "weekly-comments-save") {
+      assertAdminKey(parameters.adminKey);
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (mode === "weekly-comments-save") {
+        const result = saveWeeklyCommentsForAdmin(
+          ss,
+          JSON.parse(String(parameters.commentData || "{}"))
+        );
+        return output({ ok: true, ...result }, callback);
+      }
+      return output({ ok: true, ...readWeeklyCommentsForAdmin(ss) }, callback);
+    }
+
     if (mode === "class") {
       assertAdminKey(parameters.adminKey);
 
@@ -1526,6 +1539,126 @@ function readScores(ss, studentCode) {
   return result;
 }
 
+function getWeeklyCommentSheet(ss, createIfMissing) {
+  let sheet = ss.getSheetByName("NHAN_XET");
+  if (!sheet && createIfMissing) {
+    sheet = ss.insertSheet("NHAN_XET");
+    sheet.getRange(1, 1, 1, 2).setValues([["MaHS", "HoTen"]]);
+    sheet.setFrozenRows(1);
+    sheet.getRange("A:A").setNumberFormat("@");
+  }
+  return sheet;
+}
+
+function readWeeklyCommentsForAdmin(ss) {
+  const students = getClassList().map(student => ({
+    studentCode: String(student.studentCode || "").trim(),
+    name: String(student.name || "").trim()
+  }));
+  const sheet = getWeeklyCommentSheet(ss, false);
+  if (!sheet) return { students: students, weeks: [], comments: [] };
+
+  const values = sheet.getDataRange().getDisplayValues();
+  if (!values.length) return { students: students, weeks: [], comments: [] };
+
+  const headers = values[0] || [];
+  const weekColumns = [];
+  headers.forEach((header, column) => {
+    const match = String(header || "").trim().toUpperCase().match(/^TUAN_(\d+)$/);
+    if (match) weekColumns.push({ column: column, weekNumber: Number(match[1]) });
+  });
+
+  const canonicalMap = getCanonicalStudentCodeMap();
+  const comments = [];
+  values.slice(1).forEach(row => {
+    const studentCode = canonicalStudentCode(row[0], canonicalMap);
+    if (!studentCode) return;
+    weekColumns.forEach(item => {
+      const text = String(row[item.column] || "").trim();
+      if (text) comments.push({
+        studentCode: studentCode,
+        weekNumber: item.weekNumber,
+        text: text
+      });
+    });
+  });
+
+  return {
+    students: students,
+    weeks: weekColumns.map(item => item.weekNumber).sort((a, b) => a - b),
+    comments: comments
+  };
+}
+
+function saveWeeklyCommentsForAdmin(ss, payload) {
+  const weekNumber = Number(payload && payload.weekNumber);
+  const records = payload && Array.isArray(payload.records) ? payload.records : [];
+  if (!Number.isInteger(weekNumber) || weekNumber < 1 || weekNumber > 99) {
+    throw new Error("Số tuần phải từ 1 đến 99.");
+  }
+  if (!records.length) throw new Error("Chưa có nhận xét để lưu.");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sheet = getWeeklyCommentSheet(ss, true);
+    const classList = getClassList();
+    const canonicalMap = getCanonicalStudentCodeMap();
+    const studentNames = {};
+    classList.forEach(student => {
+      studentNames[studentCodeKey(student.studentCode)] = String(student.name || "").trim();
+    });
+
+    const lastColumn = Math.max(sheet.getLastColumn(), 2);
+    const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+    let weekColumn = -1;
+    headers.forEach((header, index) => {
+      const match = String(header || "").trim().toUpperCase().match(/^TUAN_(\d+)$/);
+      if (match && Number(match[1]) === weekNumber) weekColumn = index + 1;
+    });
+    if (weekColumn < 0) {
+      weekColumn = lastColumn + 1;
+      sheet.getRange(1, weekColumn).setValue("TUAN_" + weekNumber);
+    }
+
+    const rowByCode = {};
+    const lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues().forEach((row, index) => {
+        const canonical = canonicalStudentCode(row[0], canonicalMap);
+        if (canonical && !rowByCode[studentCodeKey(canonical)]) {
+          rowByCode[studentCodeKey(canonical)] = index + 2;
+        }
+      });
+    }
+
+    records.forEach(record => {
+      const studentCode = canonicalStudentCode(record && record.studentCode, canonicalMap);
+      const key = studentCodeKey(studentCode);
+      if (!studentCode || !studentNames[key]) {
+        throw new Error("Không tìm thấy học sinh có mã " + String(record && record.studentCode || "") + ".");
+      }
+      let rowNumber = rowByCode[key];
+      if (!rowNumber) {
+        rowNumber = sheet.getLastRow() + 1;
+        sheet.getRange(rowNumber, 1, 1, 2).setValues([[studentCode, studentNames[key]]]);
+        sheet.getRange(rowNumber, 1).setNumberFormat("@");
+        rowByCode[key] = rowNumber;
+      } else {
+        sheet.getRange(rowNumber, 1, 1, 2).setValues([[studentCode, studentNames[key]]]);
+        sheet.getRange(rowNumber, 1).setNumberFormat("@");
+      }
+      sheet.getRange(rowNumber, weekColumn)
+        .setValue(String(record.text || "").trim().slice(0, 1000));
+    });
+
+    SpreadsheetApp.flush();
+    return readWeeklyCommentsForAdmin(ss);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function readComments(ss, studentCode) {
   const sheet = ss.getSheetByName("NHAN_XET");
   if (!sheet) return [];
@@ -1888,3 +2021,4 @@ function saveHomework(ss, input) {
  return {savedCount:updates.length};
  }finally{lock.releaseLock();}
 }
+
