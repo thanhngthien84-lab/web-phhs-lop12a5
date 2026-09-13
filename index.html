@@ -1014,7 +1014,7 @@ function weeklyCommentRequest(mode,params){
  function finish(r){
   if(finished)return;finished=true;clearTimeout(timer);script.remove();
   window[callback]=()=>{};setTimeout(()=>delete window[callback],60000);
-  if(!r||!r.ok){reject(new Error(r&&r.message||"Chưa nhận được phản hồi từ Google Sheet. Hãy kiểm tra kết nối rồi thử lại."));return;}
+  if(!r||!r.ok){const message=r&&r.message||"Chưa nhận được phản hồi từ Google Sheet. Hãy kiểm tra kết nối rồi thử lại.";if(isInvalidGoogleAdminKeyMessage(message))clearGoogleAdminKey();reject(new Error(message));return;}
   resolve(r);
  }
  window[callback]=finish;script.onerror=()=>finish(null);
@@ -1135,7 +1135,7 @@ function homeworkRequest(mode,params) {
  function finish(r){
  if(finished)return;finished=true;clearTimeout(timer);script.remove();
  window[callback]=()=>{};setTimeout(()=>delete window[callback],60000);
- if(!r||!r.ok){reject(new Error(r&&r.message||"Chưa xác nhận được kết quả từ Sheet. Hãy thử lại; bản ghi cùng ngày và môn sẽ được cập nhật, không tạo trùng."));return;}
+ if(!r||!r.ok){const message=r&&r.message||"Chưa xác nhận được kết quả từ Sheet. Hãy thử lại; bản ghi cùng ngày và môn sẽ được cập nhật, không tạo trùng.";if(isInvalidGoogleAdminKeyMessage(message))clearGoogleAdminKey();reject(new Error(message));return;}
  resolve(r);
  }
  window[callback]=finish;script.onerror=()=>finish(null);
@@ -1347,7 +1347,7 @@ function requestScoreBookGoogle(mode, params) {
             if (finished) return;
             finished = true; cleanup();
             if (!response || !response.ok || !response.scoreBook) {
-                if (response && response.message === "Mã quản trị không chính xác.") clearGoogleAdminKey();
+                if (isInvalidGoogleAdminKeyMessage(response && response.message)) clearGoogleAdminKey();
                 reject(new Error((response && response.message) || "Không thể xử lý dữ liệu điểm.")); return;
             }
             resolve(response);
@@ -3909,7 +3909,7 @@ window.requestBulkStudentSaveToGoogle = function(students, adminKey) {
             finished = true;
             cleanup();
             if (!response || !response.ok || !Array.isArray(response.students)) {
-                if (response && response.message === "Mã quản trị không chính xác.") clearGoogleAdminKey();
+                if (isInvalidGoogleAdminKeyMessage(response && response.message)) clearGoogleAdminKey();
                 reject(new Error((response && response.message) || "Không thể lưu danh sách lên Google Sheet."));
                 return;
             }
@@ -4151,7 +4151,7 @@ window.requestStudentSaveToGoogle = function(studentPayload, adminKey) {
             if (!response || !response.ok || !response.student) {
                 const message = (response && response.message) ||
                     "Không thể lưu học sinh lên Google Sheet.";
-                if (message === "Mã quản trị không chính xác.") {
+                if (isInvalidGoogleAdminKeyMessage(message)) {
                     clearGoogleAdminKey();
                 }
                 reject(new Error(message));
@@ -5015,7 +5015,7 @@ window.openEditGroupModal = function(id) {
                     if (!response || !response.ok || !response.settings) {
                         const message = (response && response.message) ||
                             "Không thể lưu tên lớp.";
-                        if (message === "Mã quản trị không chính xác.") {
+                        if (isInvalidGoogleAdminKeyMessage(message)) {
                             clearGoogleAdminKey();
                         }
                         reject(new Error(message));
@@ -5106,6 +5106,10 @@ window.openEditGroupModal = function(id) {
             } catch (error) {
                 console.warn("Không thể lưu phiên quản trị:", error);
             }
+        }
+
+        function isInvalidGoogleAdminKeyMessage(message) {
+            return /mã quản trị không chính xác/i.test(String(message || ""));
         }
 
         function clearGoogleAdminKey() {
@@ -5205,7 +5209,7 @@ window.openEditGroupModal = function(id) {
                 if (!response || !response.ok || !Array.isArray(response.sheets)) {
                     const message = (response && response.message) ||
                         "Không thể kiểm tra kết nối Google Sheet.";
-                    if (message === "Mã quản trị không chính xác.") {
+                    if (isInvalidGoogleAdminKeyMessage(message)) {
                         clearGoogleAdminKey();
                     }
                     window.googleSheetHealthReport = null;
@@ -5294,7 +5298,7 @@ window.openEditGroupModal = function(id) {
 
                 if (!response || !response.ok || !Array.isArray(response.attendance)) {
                     restoreButton();
-                    if (response && response.message === "Mã quản trị không chính xác.") {
+                    if (isInvalidGoogleAdminKeyMessage(response && response.message)) {
                         clearGoogleAdminKey();
                     }
                     showToast(
@@ -5360,7 +5364,7 @@ window.openEditGroupModal = function(id) {
                     if (!response || !response.ok) {
                         const message = (response && response.message) ||
                             "Không thể kết nối để lưu điểm danh.";
-                        const wrongAdminKey = message === "Mã quản trị không chính xác.";
+                        const wrongAdminKey = isInvalidGoogleAdminKeyMessage(message);
 
                         if (wrongAdminKey) {
                             clearGoogleAdminKey();
@@ -5811,7 +5815,7 @@ window.openEditGroupModal = function(id) {
                 if (!response || !response.ok || !Array.isArray(response.students)) {
                     const message = (response && response.message) ||
                         "Không thể tạo mã tra cứu.";
-                    if (message === "Mã quản trị không chính xác.") {
+                    if (isInvalidGoogleAdminKeyMessage(message)) {
                         clearGoogleAdminKey();
                     }
                     showToast(message, "error");
