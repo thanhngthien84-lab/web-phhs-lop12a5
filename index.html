@@ -158,7 +158,6 @@
             attendanceRecords: {},
             scores: [],
             teacherComments: [],
-            scoreBook: { tests: [], students: [], selectedSubject: 'TOAN', selectedTestCode: '', draftTest: null, loaded: false, loading: false, updatedAt: '' },
             attendanceTab: 'diem-danh',
             
             // --- Cập nhật State cho form Tích điểm mới ---
@@ -178,9 +177,6 @@
             criteria: null
         };
 
-       window.addEventListener("beforeunload", function(event) {
-           if (window.hwUI && (window.hwUI.dirty || window.hwUI.busy)) { event.preventDefault(); event.returnValue = ""; }
-       });
        let timerInterval = null;
         let timerSeconds = 0;
         let isTimerRunning = false;
@@ -204,7 +200,6 @@
         const menuItems = [
             { id: 'tong-quan', icon: 'ph-squares-four', label: 'Trang chủ' },
             { id: 'hoc-sinh', icon: 'ph-users', label: 'Học sinh' },
-            { id: 'diem-hoc-tap', icon: 'ph-chart-line-up', label: 'Điểm học tập' },
             { id: 'thoi-khoa-bieu', icon: 'ph-calendar-list', label: 'Thời khóa biểu' },
             { id: 'so-do-lop', icon: 'ph-grid-four', label: 'Sơ đồ lớp' },
             { id: 'doi-qua', icon: 'ph-gift', label: 'Quà tặng' },
@@ -271,10 +266,6 @@
             if (!state.attendanceRecords) state.attendanceRecords = {};
             if (!state.scores) state.scores = [];
             if (!state.teacherComments) state.teacherComments = [];
-            if (!state.scoreBook) state.scoreBook = { tests: [], students: [], selectedSubject: 'TOAN', selectedTestCode: '', draftTest: null, loaded: false, loading: false, updatedAt: '' };
-            if (!Array.isArray(state.scoreBook.tests)) state.scoreBook.tests = [];
-            if (!Array.isArray(state.scoreBook.students)) state.scoreBook.students = [];
-            if (!state.scoreBook.selectedSubject) state.scoreBook.selectedSubject = 'TOAN';
             if (!state.attendanceTab) state.attendanceTab = 'diem-danh';
             if (!state.students) state.students = [];
             if (!state.timetable) state.timetable = { dayUrl: '', extraUrl: '' };
@@ -357,12 +348,7 @@ window.switchSettingsTab = function(tab) {
     renderLayout();
 };
 
-window.switchTab = function(tabId) {
-    if (window.hwUI && window.hwUI.busy) return;
-    if (window.hwUI && window.hwUI.dirty) {
-        if (!confirm('BTVN chưa lưu. Bạn muốn rời trang và bỏ phần đang sửa?')) return;
-        prepareHomeworkDraft();
-    } 
+window.switchTab = function(tabId) { 
     // Giới hạn tab nếu là Ban cán sự
     if (state.auth && state.auth.role === 'bancansu') {
         const allowed = ['tong-quan', 'hoc-sinh', 'thoi-khoa-bieu', 'diem-danh'];
@@ -387,10 +373,7 @@ window.switchTab = function(tabId) {
     }
     
     state.currentTab = tabId; 
-    renderLayout();
-    if (tabId === 'diem-hoc-tap' && window.learningSection !== 'homework') {
-        setTimeout(function() { loadScoreBookFromGoogle({ silent: true }); }, 0);
-    }
+    renderLayout(); 
 };
 function renderSidebar() {
     // Lọc menu theo quyền đăng nhập
@@ -499,9 +482,9 @@ function renderHeader() {
             </div>
             
             <div class="flex items-center gap-4">
-                <a href="?phhs=1" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 text-xs font-bold text-white bg-gradient-to-r from-orange-400 to-amber-500 px-4 py-2 rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all" title="Mở trang tra cứu PHHS ở tab mới; nhấp chuột phải để sao chép liên kết" aria-label="Link PHHS — mở trang tra cứu ở tab mới">
-                    <i class="ph-bold ph-link text-sm"></i> <span>Link PHHS</span>
-                </a>
+                <button onclick="openParentLookupModal()" class="flex items-center gap-2 text-xs font-bold text-white bg-gradient-to-r from-orange-400 to-amber-500 px-4 py-2 rounded-xl shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all" title="Cổng Phụ Huynh tra cứu">
+                    <i class="ph-bold ph-magnifying-glass text-sm"></i> <span class="hidden sm:inline">Tra cứu</span>
+                </button>
                 ${syncStatus}
                 <div class="flex items-center gap-3 bg-white border border-slate-200 py-1.5 px-2 sm:px-4 rounded-2xl shadow-sm transition-all">
                     <div class="text-right hidden sm:block ${(!state.auth || state.auth.role === 'gvcn') ? 'cursor-pointer group hover:text-blueAccent' : ''}" ${(!state.auth || state.auth.role === 'gvcn') ? 'onclick="openEditAdminModal()"' : ''}>
@@ -535,7 +518,6 @@ window.closeModal = function(id) {
             switch (state.currentTab) {
                 case 'tong-quan': contentHtml = renderViewTongQuan(); break;
                 case 'hoc-sinh': contentHtml = renderViewHocSinh(); break;
-                case 'diem-hoc-tap': contentHtml = renderViewDiemHocTap(); break;
                 case 'thoi-khoa-bieu': contentHtml = renderViewThoiKhoaBieu(); break;
                 case 'so-do-lop': contentHtml = renderViewSoDoLop(); break;
                 case 'lich-bao-giang': contentHtml = renderViewLichBaoGiang(); break;
@@ -953,11 +935,11 @@ window.closeModal = function(id) {
                             </h2>
                             <p class="text-slate-500 text-sm font-medium mt-1">Thông tin chi tiết, vai trò và mục tiêu phấn đấu của các em</p>
                         </div>
-                                                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full">
+                            <button onclick="syncClassFromGoogle()" class="w-full px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Tải lại dữ liệu</button>
+                            <button id="generate-lookup-codes-button" onclick="generateMissingLookupCodes()" class="w-full px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-xl text-sm shadow-sm hover:bg-amber-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-key text-lg"></i> Bổ sung mã còn thiếu</button>
                             <button onclick="openEditStudentModal(null)" class="w-full px-5 py-3 bg-[#0f172a] text-white font-bold rounded-xl text-sm shadow-md hover:bg-black transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-user-plus text-lg"></i> Thêm HS</button>
-                            <button onclick="openBulkStudentModal()" class="w-full px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold rounded-xl text-sm shadow-sm hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-rows-plus-bottom text-lg"></i> Nhập nhanh</button>
                             <button onclick="openConnectedGoogleSheet()" class="w-full px-5 py-3 bg-blue-50 text-blue-700 border border-blue-200 font-bold rounded-xl text-sm shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-table text-lg"></i> Mở Google Sheet</button>
-                            <button onclick="syncClassFromGoogle()" class="w-full px-5 py-3 bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold rounded-xl text-sm shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ từ Sheet</button>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 xl:gap-8">
@@ -972,526 +954,6 @@ window.closeModal = function(id) {
                 </div>
             `;
         }
-function homeworkUI() {
- if(!window.hwUI)window.hwUI={date:new Date().toLocaleDateString("sv-SE"),subjectCode:"TOAN",title:"",students:[],records:[],draft:{},loaded:false,busy:false,dirty:false};
- return window.hwUI;
-}
-
-function homeworkStatusLabels(){return {done:"Hoàn thành",missing:"Chưa làm",partial:"Làm chưa đủ",supplemented:"Đã bổ sung"};}
-
-function homeworkTabs() {
- const active=window.learningSection||"scores";
- return '<div class="flex flex-wrap gap-2 mb-5" role="group" aria-label="Nội dung học tập">'+[["scores","Điểm kiểm tra"],["homework","BTVN"],["comments","Nhận xét tuần"]].map(x=>'<button onclick="changeLearningSection(\''+x[0]+'\')" class="px-5 py-3 rounded-xl font-bold '+(active===x[0]?'bg-indigo-600 text-white':'bg-white border border-slate-200 text-slate-600')+'">'+x[1]+'</button>').join("")+'</div>';
-}
-
-function changeLearningSection(section) {
- const h=homeworkUI(),c=weeklyCommentUI();
- if(h.busy||c.busy)return;
- if(window.learningSection==="homework"&&h.dirty&&!confirm("BTVN chưa lưu. Bạn muốn bỏ phần đang sửa?"))return;
- if(window.learningSection==="comments"&&c.dirty&&!confirm("Nhận xét tuần chưa lưu. Bạn muốn bỏ phần đang sửa?"))return;
- if(window.learningSection==="homework")prepareHomeworkDraft();
- if(window.learningSection==="comments")prepareWeeklyCommentDraft();
- window.learningSection=section;renderLayout();
- if(section==="homework"&&!h.loaded)loadHomework();
- if(section==="comments"&&!c.loaded)loadWeeklyComments();
-}
-
-function renderViewDiemHocTap(){
- const section=window.learningSection||"scores";
- return homeworkTabs()+(section==="homework"?renderHomework():section==="comments"?renderWeeklyComments():renderViewScoreEntry());
-}
-
-function weeklyCommentUI(){
- if(!window.weeklyCommentsUI)window.weeklyCommentsUI={weekNumber:1,weeks:[],students:[],records:[],draft:{},touched:{},loaded:false,busy:false,dirty:false};
- return window.weeklyCommentsUI;
-}
-
-function weeklyCommentRequest(mode,params){
- return new Promise((resolve,reject)=>{
- const callback="wc_"+Date.now()+"_"+Math.floor(Math.random()*1e8),script=document.createElement("script");
- let finished=false;
- const timer=setTimeout(()=>finish(null),35000);
- function finish(r){
-  if(finished)return;finished=true;clearTimeout(timer);script.remove();
-  window[callback]=()=>{};setTimeout(()=>delete window[callback],60000);
-  if(!r||!r.ok){reject(new Error(r&&r.message||"Chưa nhận được phản hồi từ Google Sheet. Hãy kiểm tra kết nối rồi thử lại."));return;}
-  resolve(r);
- }
- window[callback]=finish;script.onerror=()=>finish(null);
- script.src=GOOGLE_SHEET_API_URL+"?"+new URLSearchParams({mode,...params,callback});document.head.appendChild(script);
- });
-}
-
-function prepareWeeklyCommentDraft(){
- const c=weeklyCommentUI();c.draft={};c.touched={};
- c.students.forEach(s=>{c.draft[s.studentCode]="";});
- c.records.filter(r=>Number(r.weekNumber)===Number(c.weekNumber)).forEach(r=>{c.draft[r.studentCode]=r.text||"";});
- c.dirty=false;
-}
-
-async function loadWeeklyComments(){
- const c=weeklyCommentUI();if(c.busy)return;
- if(c.dirty&&!confirm("Tải lại sẽ bỏ nhận xét tuần chưa lưu. Tiếp tục?"))return;
- const key=getGoogleAdminKey();if(!key)return;
- c.busy=true;renderLayout();
- try{
-  const r=await weeklyCommentRequest("weekly-comments",{adminKey:key});
-  c.records=r.comments||[];c.students=r.students||[];c.weeks=r.weeks||[];
-  if(!c.loaded)c.weekNumber=c.weeks.length?Math.max(...c.weeks.map(Number)):1;
-  c.loaded=true;prepareWeeklyCommentDraft();rememberGoogleAdminKey(key);
- }catch(e){showToast(e.message,"error");}
- finally{c.busy=false;if(window.learningSection==="comments")renderLayout();}
-}
-
-function changeWeeklyCommentWeek(value){
- const c=weeklyCommentUI();if(c.busy)return;
- if(c.dirty&&!confirm("Nhận xét tuần chưa lưu. Bỏ phần đang sửa để chuyển tuần?")){renderLayout();return;}
- c.weekNumber=Math.max(1,Math.min(99,Number(value)||1));prepareWeeklyCommentDraft();renderLayout();
-}
-
-function editWeeklyComment(index,value){
- const c=weeklyCommentUI();if(c.busy)return;
- const student=c.students[index];if(!student)return;
- c.draft[student.studentCode]=String(value||"").slice(0,1000);c.touched[student.studentCode]=true;c.dirty=true;
- const count=document.getElementById("weekly-comment-count");
- if(count)count.textContent=Object.values(c.draft).filter(x=>String(x).trim()).length+"/"+c.students.length+" học sinh có nhận xét";
-}
-
-function pasteWeeklyComments(event,startIndex){
- const text=event.clipboardData&&event.clipboardData.getData("text");
- if(!text||!text.includes("\n"))return;
- event.preventDefault();
- const c=weeklyCommentUI(),lines=text.replace(/\r/g,"").split("\n");
- if(lines.length&&lines[lines.length-1]==="")lines.pop();
- lines.forEach((line,offset)=>{
- const student=c.students[startIndex+offset];
-  if(student){
-   c.draft[student.studentCode]=line.trim().slice(0,1000);
-   c.touched[student.studentCode]=true;
-  }
- });
- c.dirty=true;renderLayout();
-}
-
-function renderWeeklyComments(){
- const c=weeklyCommentUI(),esc=escapeHtmlText,disabled=c.busy?"disabled":"";
- const button="px-4 py-3 rounded-xl border font-bold disabled:opacity-50";
- const filled=Object.values(c.draft).filter(x=>String(x).trim()).length;
- return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 space-y-5">
- <div><h2 class="font-black text-2xl">Nhận xét học sinh theo tuần</h2><p class="text-slate-500 mt-1">Nhập trực tiếp hoặc dán một cột nhận xét từ Excel/Google Sheet.</p></div>
- <div class="flex flex-wrap gap-3">
-  <button ${disabled} onclick="loadWeeklyComments()" class="${button} text-emerald-700">Tải nhận xét mới nhất</button>
-  <button ${disabled} onclick="openConnectedGoogleSheet()" class="${button} text-blue-700">Mở Google Sheet</button>
-  <button ${disabled} onclick="saveWeeklyCommentsUI()" class="${button} bg-indigo-600 text-white">${c.busy?"Đang lưu…":"Lưu nhận xét"}</button>
- </div>
- ${!c.loaded?'<p class="text-slate-500">'+(c.busy?"Đang tải nhận xét…":"Bấm Tải nhận xét mới nhất để lấy danh sách học sinh.")+'</p>':`
- <fieldset ${disabled} class="space-y-5">
-  <div class="grid sm:grid-cols-[220px_1fr] gap-4 items-end">
-   <label class="font-bold">Tuần<input aria-label="Số tuần nhận xét" type="number" min="1" max="99" value="${c.weekNumber}" onchange="changeWeeklyCommentWeek(this.value)" class="block mt-2 w-full border rounded-xl p-3"></label>
-   <div><p id="weekly-comment-count" class="font-bold text-indigo-700">${filled}/${c.students.length} học sinh có nhận xét</p><p class="text-sm text-slate-500 mt-1">Dán cả một cột vào ô đầu tiên để điền nhanh theo đúng thứ tự danh sách.</p></div>
-  </div>
-  <div class="overflow-x-auto border rounded-2xl"><table class="w-full min-w-[760px] text-sm">
-   <thead class="bg-slate-50"><tr><th class="p-3 text-left w-16">STT</th><th class="p-3 text-left w-64">Học sinh</th><th class="p-3 text-left">Nhận xét tuần ${c.weekNumber}</th></tr></thead>
-   <tbody>${c.students.map((s,i)=>`<tr class="border-t border-slate-100"><td class="p-3 text-slate-500">${i+1}</td><td class="p-3"><div class="font-bold">${esc(s.name)}</div><div class="text-xs text-slate-500">${esc(s.studentCode)}</div></td><td class="p-3"><textarea aria-label="Nhận xét ${esc(s.name)}" maxlength="1000" rows="2" oninput="editWeeklyComment(${i},this.value)" onpaste="pasteWeeklyComments(event,${i})" class="w-full border rounded-xl p-3 resize-y" placeholder="Nhập nhận xét cho học sinh">${esc(c.draft[s.studentCode]||"")}</textarea></td></tr>`).join("")||'<tr><td colspan="3" class="p-5 text-slate-500">Chưa có học sinh trong Sheet.</td></tr>'}</tbody>
-  </table></div>
- </fieldset>`}</section>`;
-}
-
-async function saveWeeklyCommentsUI(){
- const c=weeklyCommentUI();if(c.busy||!c.loaded)return;
- if(!c.students.length)return showToast("Chưa có học sinh để lưu nhận xét.","error");
- const key=getGoogleAdminKey();if(!key)return;
- const records=c.students.filter(s=>c.touched[s.studentCode]).map(s=>({studentCode:s.studentCode,text:c.draft[s.studentCode]||""}));
- if(!records.length)return showToast("Bạn chưa thay đổi nhận xét nào.","error");
- const input={weekNumber:c.weekNumber,records:[]};
- c.busy=true;renderLayout();let saved=0;
- try{
-  let batch=[];const batches=[];
-  for(const record of records){
-   const test=[...batch,record];
-   if(batch.length&&encodeURIComponent(JSON.stringify({...input,records:test})).length>6000){batches.push(batch);batch=[];}
-   batch.push(record);
-  }
-  if(batch.length)batches.push(batch);
-  for(const items of batches){
-   await weeklyCommentRequest("weekly-comments-save",{adminKey:key,commentData:JSON.stringify({...input,records:items})});
-   saved+=items.length;
-  }
-  const changedCodes=new Set(records.map(record=>String(record.studentCode)));
-  c.records=c.records.filter(record=>Number(record.weekNumber)!==Number(c.weekNumber)||!changedCodes.has(String(record.studentCode)));
-  records.filter(record=>String(record.text||"").trim()).forEach(record=>c.records.push({studentCode:record.studentCode,weekNumber:c.weekNumber,text:String(record.text).trim()}));
-  if(!c.weeks.map(Number).includes(Number(c.weekNumber)))c.weeks.push(Number(c.weekNumber));
-  prepareWeeklyCommentDraft();
-  rememberGoogleAdminKey(key);showToast("Đã lưu nhận xét tuần "+c.weekNumber+" cho "+saved+" học sinh.","success");
- }catch(e){showToast("Đã xác nhận lưu "+saved+"/"+records.length+" học sinh. "+e.message,"error");}
- finally{c.busy=false;renderLayout();}
-}
-
-function homeworkRequest(mode,params) {
- return new Promise((resolve,reject)=>{
- const callback="hw_"+Date.now()+"_"+Math.floor(Math.random()*1e8),script=document.createElement("script");
- let finished=false;
- const timer=setTimeout(()=>finish(null),35000);
- function finish(r){
- if(finished)return;finished=true;clearTimeout(timer);script.remove();
- window[callback]=()=>{};setTimeout(()=>delete window[callback],60000);
- if(!r||!r.ok){reject(new Error(r&&r.message||"Chưa xác nhận được kết quả từ Sheet. Hãy thử lại; bản ghi cùng ngày và môn sẽ được cập nhật, không tạo trùng."));return;}
- resolve(r);
- }
- window[callback]=finish;script.onerror=()=>finish(null);
- script.src=GOOGLE_SHEET_API_URL+"?"+new URLSearchParams({mode,...params,callback});document.head.appendChild(script);
- });
-}
-
-function prepareHomeworkDraft() {
- const h=homeworkUI();h.draft={};h.title="";
- h.students.forEach(s=>{h.draft[s.studentCode]={status:"",note:""};});
- h.records.filter(r=>r.date===h.date&&r.subjectCode===h.subjectCode).forEach(r=>{
- h.draft[r.studentCode]={status:r.status,note:r.note||""};if(!h.title)h.title=r.title||"";
- });
- h.dirty=false;
-}
-
-async function loadHomework() {
- const h=homeworkUI();if(h.busy)return;
- if(h.dirty&&!confirm("Tải lại sẽ bỏ BTVN chưa lưu. Tiếp tục?"))return;
- const key=getGoogleAdminKey();if(!key)return;
- h.busy=true;renderLayout();
- try{
- const r=await homeworkRequest("homework",{adminKey:key});h.records=r.records||[];h.students=r.students||[];h.loaded=true;prepareHomeworkDraft();rememberGoogleAdminKey(key);
- }catch(e){showToast(e.message,"error");}
- finally{h.busy=false;if(window.learningSection==="homework")renderLayout();}
-}
-
-function changeHomeworkFilter(field,value) {
- const h=homeworkUI();if(h.busy)return;
- if(h.dirty&&!confirm("BTVN chưa lưu. Bỏ phần đang sửa để chuyển?")){renderLayout();return;}
- h[field]=value;prepareHomeworkDraft();renderLayout();
-}
-
-function editHomework(index,field,value) {
- const h=homeworkUI();if(h.busy)return;
- const code=h.students[index].studentCode;
- h.draft[code][field]=value;h.dirty=true;
-}
-
-function markHomeworkComplete(){
- const h=homeworkUI();if(h.busy)return;
- if(Object.values(h.draft).some(r=>r.status&&r.status!=="done")&&!confirm("Đổi tất cả học sinh thành Hoàn thành? Bạn có thể chọn lại từng em sau đó."))return;
- h.students.forEach(s=>{h.draft[s.studentCode].status="done";});h.dirty=true;renderLayout();
-}
-
-function renderHomework(){
- const h=homeworkUI(),esc=escapeHtmlText,disabled=h.busy?"disabled":"";
- const button="px-4 py-3 rounded-xl border font-bold disabled:opacity-50";
- const subjects={TOAN:"Toán",VAN:"Văn",ANH:"Anh",LY:"Lý",HOA:"Hoá",SINH:"Sinh"};
- return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 space-y-5">
- <h2 class="font-black text-2xl">Bài tập về nhà</h2>
- <div class="flex flex-wrap gap-3">
- <button ${disabled} onclick="loadHomework()" class="${button} text-emerald-700">Tải BTVN mới nhất</button>
- <button ${disabled} onclick="openConnectedGoogleSheet()" class="${button} text-blue-700">Mở Google Sheet</button></div>
- ${!h.loaded?'<p class="text-slate-500">'+(h.busy?"Đang tải BTVN…":"Bấm Tải BTVN mới nhất để lấy danh sách học sinh.")+'</p>':`
- <fieldset ${disabled} class="space-y-5">
- <div class="grid sm:grid-cols-2 gap-4">
- <label class="font-bold">Môn học<select aria-label="Môn BTVN" onchange="changeHomeworkFilter('subjectCode',this.value)" class="block mt-2 w-full border rounded-xl p-3">${Object.entries(subjects).map(([k,v])=>`<option value="${k}" ${k===h.subjectCode?"selected":""}>${v}</option>`).join("")}</select></label>
- <label class="font-bold">Ngày kiểm tra BTVN<input aria-label="Ngày kiểm tra BTVN" type="date" value="${esc(h.date)}" onchange="changeHomeworkFilter('date',this.value)" class="block mt-2 w-full border rounded-xl p-3"></label></div>
- <label class="block font-bold">Bài tập (không bắt buộc)<input maxlength="200" value="${esc(h.title)}" oninput="homeworkUI().title=this.value;homeworkUI().dirty=true" class="block mt-2 w-full border rounded-xl p-3" placeholder="Ví dụ: Bài 1–5 trang 20"></label>
- <div class="flex flex-wrap gap-3"><button onclick="markHomeworkComplete()" class="${button} bg-emerald-50 text-emerald-700">Cả lớp hoàn thành</button><button onclick="saveHomeworkUI()" class="${button} bg-indigo-600 text-white">${h.busy?"Đang lưu…":"Lưu BTVN"}</button></div>
- <p class="text-sm text-slate-500">Chọn cả lớp hoàn thành, sau đó chọn riêng các em chưa làm hoặc làm chưa đủ. “Chưa ghi nhận” không tính là hoàn thành. Mỗi môn và ngày lưu một lần kiểm tra.</p>
- <div class="space-y-4">${h.students.map((s,i)=>{
- const d=h.draft[s.studentCode]||{status:"",note:""};
- const previous=h.records.find(r=>r.date===h.date&&r.subjectCode===h.subjectCode&&r.studentCode===s.studentCode);
- const canSupplement=previous&&["missing","partial","supplemented"].includes(previous.status);
- return `<div class="border rounded-2xl p-4"><div class="font-bold mb-3">${esc(s.name)} <span class="font-normal text-sm text-slate-500">${esc(s.studentCode)}</span></div>
- <div class="flex flex-wrap gap-3">${[["","Chưa ghi nhận"],...Object.entries(homeworkStatusLabels())].map(([value,label])=>`<label class="border rounded-xl px-3 py-2 text-sm ${d.status===value?"bg-indigo-50 border-indigo-400":"bg-white"}"><input type="radio" name="hw-status-${i}" value="${value}" ${d.status===value?"checked":""} ${(!value&&previous)||(value==="supplemented"&&!canSupplement)?"disabled":""} onchange="editHomework(${i},'status',this.value)"> ${label}</label>`).join("")}</div>
- <input aria-label="Ghi chú BTVN ${esc(s.name)}" maxlength="500" value="${esc(d.note)}" oninput="editHomework(${i},'note',this.value)" class="mt-3 w-full border rounded-xl p-3 text-sm" placeholder="Ghi chú nếu có"></div>`;
- }).join("")||'<p>Chưa có học sinh trong Sheet.</p>'}</div></fieldset>`}</section>`;
-}
-
-async function saveHomeworkUI(){
- const h=homeworkUI();if(h.busy||!h.loaded)return;
- const records=h.students.map(s=>({studentCode:s.studentCode,...h.draft[s.studentCode]})).filter(r=>r.status);
- if(!records.length)return showToast("Chưa có trạng thái BTVN để lưu.","error");
- const key=getGoogleAdminKey();if(!key)return;
- const input={date:h.date,subjectCode:h.subjectCode,title:h.title,records:[]};
- h.busy=true;renderLayout();let saved=0;
- try {
- let batch=[];
- const batches=[];
- for(const r of records){
- const test=[...batch,r];
- if(batch.length&&(test.length>4||encodeURIComponent(JSON.stringify({...input,records:test})).length>6000)){batches.push(batch);batch=[];}
- batch.push(r);
- }
- if(batch.length)batches.push(batch);
- for(const items of batches){await homeworkRequest("homework-save",{adminKey:key,homework:JSON.stringify({...input,records:items})});saved+=items.length;}
- const fresh=await homeworkRequest("homework",{adminKey:key});h.records=fresh.records;h.students=fresh.students;prepareHomeworkDraft();
- rememberGoogleAdminKey(key);showToast("Đã lưu BTVN cho "+saved+" học sinh.","success");
- }catch(e){showToast("Đã xác nhận lưu "+saved+"/"+records.length+" học sinh. "+e.message,"error");}
- finally{h.busy=false;renderLayout();}
-}
-
-function renderParentHomework(studentCode){
- const rows=(window.parentHomework||[]).filter(r=>String(r.studentCode)===String(studentCode));
- const esc=escapeHtmlText,labels=homeworkStatusLabels(),subjects={TOAN:"Toán",VAN:"Văn",ANH:"Anh",LY:"Lý",HOA:"Hoá",SINH:"Sinh"};
- return '<section class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200"><h3 class="font-black text-xl text-slate-800 mb-4">Bài tập về nhà</h3>'+
- (!rows.length?'<p class="text-slate-500">Chưa có ghi nhận BTVN từ giáo viên.</p>':
- '<div class="overflow-x-auto"><table class="w-full min-w-[650px] text-sm"><thead class="bg-slate-50"><tr>'+["Ngày kiểm tra","Môn","Bài tập","Tình trạng","Ghi chú"].map(x=>'<th class="p-3 text-left">'+x+'</th>').join("")+'</tr></thead><tbody>'+
- rows.map(r=>'<tr class="border-b border-slate-100"><td class="p-3">'+esc(formatDateForDisplay(r.date))+'</td><td class="p-3">'+esc(subjects[r.subjectCode]||r.subjectCode)+'</td><td class="p-3">'+esc(r.title||"—")+'</td><td class="p-3 font-bold">'+esc(labels[r.status]||"Chưa ghi nhận")+(r.status==="supplemented"?'<div class="text-xs font-normal mt-1">Ban đầu: '+esc(labels[r.initialStatus]||"—")+(r.supplementedAt?'<br>Bổ sung: '+esc(new Date(r.supplementedAt).toLocaleDateString("vi-VN")):"")+'</div>':"")+'</td><td class="p-3 whitespace-pre-line">'+esc(r.note||"—")+'</td></tr>').join("")+'</tbody></table></div>')+'</section>';
-}
-
-function renderViewScoreEntry() {
-    const book = state.scoreBook || {};
-    const subjects = [
-        { code: "TOAN", label: "Toán" }, { code: "VAN", label: "Văn" },
-        { code: "ANH", label: "Anh" }, { code: "LY", label: "Lý" },
-        { code: "HOA", label: "Hoá" }, { code: "SINH", label: "Sinh" }
-    ];
-    const selectedSubject = book.selectedSubject || "TOAN";
-    const subjectTests = (book.tests || []).filter(function(test) { return test.subjectCode === selectedSubject; });
-    let selectedTest = null;
-    if (book.selectedTestCode === "__new__" && book.draftTest) {
-        selectedTest = book.draftTest;
-    } else {
-        selectedTest = subjectTests.find(function(test) { return test.code === book.selectedTestCode; }) || subjectTests[0] || null;
-        if (selectedTest) book.selectedTestCode = selectedTest.code;
-    }
-
-    const subjectOptions = subjects.map(function(subject) {
-        return '<option value="' + subject.code + '" ' + (subject.code === selectedSubject ? "selected" : "") + ">" + subject.label + "</option>";
-    }).join("");
-    const testOptions = subjectTests.map(function(test) {
-        return '<option value="' + escapeHtmlText(test.code) + '" ' + (selectedTest && selectedTest.code === test.code ? "selected" : "") + ">" +
-            escapeHtmlText(test.title) + (test.date ? " · " + escapeHtmlText(test.date) : "") + "</option>";
-    }).join("");
-
-    const scoreRowsByCode = {};
-    (book.students || []).forEach(function(row) { scoreRowsByCode[String(row.studentCode || "").trim()] = row; });
-    const students = (state.students || []).filter(function(student) { return String(student.studentCode || "").trim(); });
-    const savedScores = [];
-    if (selectedTest && selectedTest.code && selectedTest.code !== "__new__") {
-        students.forEach(function(student) {
-            const row = scoreRowsByCode[String(student.studentCode || "").trim()];
-            const entry = row && row.scores ? row.scores[selectedTest.code] : null;
-            const value = entry ? Number(String(entry.score || "").replace(",", ".")) : NaN;
-            if (Number.isFinite(value)) savedScores.push(value);
-        });
-    }
-    const average = savedScores.length ? savedScores.reduce(function(sum, score) { return sum + score; }, 0) / savedScores.length : null;
-    const highest = savedScores.length ? Math.max.apply(null, savedScores) : null;
-    const belowFive = savedScores.filter(function(score) { return score < 5; }).length;
-    const cards = [
-        ["Đã nhập", savedScores.length + "/" + students.length, "bg-blue-50", "text-blue-700"],
-        ["Điểm TB lớp", average === null ? "--" : average.toFixed(2), "bg-indigo-50", "text-indigo-700"],
-        ["Điểm cao nhất", highest === null ? "--" : String(highest), "bg-emerald-50", "text-emerald-700"],
-        ["Dưới 5", String(belowFive), "bg-rose-50", "text-rose-700"]
-    ].map(function(card) {
-        return '<div class="' + card[2] + ' rounded-2xl px-4 py-3 border border-white"><div class="text-xs font-bold text-slate-500 mb-1">' +
-            card[0] + '</div><div class="text-xl font-black ' + card[3] + '">' + card[1] + '</div></div>';
-    }).join("");
-
-    const rowsHtml = selectedTest ? students.map(function(student, index) {
-        const code = String(student.studentCode || "").trim();
-        const row = scoreRowsByCode[code];
-        const entry = selectedTest.code && row && row.scores ? row.scores[selectedTest.code] : null;
-        const score = entry ? String(entry.score || "") : "";
-        const note = entry ? String(entry.note || "") : "";
-        return '<tr class="score-entry-row border-b border-slate-100 last:border-0">' +
-            '<td class="px-4 py-3 text-center text-sm font-bold text-slate-400">' + (index + 1) + '</td>' +
-            '<td class="px-4 py-3"><div class="font-bold text-slate-800">' + escapeHtmlText(student.name || "Chưa có tên") +
-            '</div><div class="text-xs text-slate-400 mt-0.5">' + escapeHtmlText(code) + '</div></td>' +
-            '<td class="px-4 py-3 w-40"><input data-score-field="score" data-student-code="' + escapeHtmlText(code) +
-            '" value="' + escapeHtmlText(score) + '" inputmode="decimal" onpaste="handleScoreGridPaste(event,' + index +
-            ',0)" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-center font-black text-blue-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="--"></td>' +
-            '<td class="px-4 py-3 min-w-[240px]"><input data-score-field="note" data-student-code="' + escapeHtmlText(code) +
-            '" value="' + escapeHtmlText(note) + '" onpaste="handleScoreGridPaste(event,' + index +
-            ',1)" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="Ghi chú nếu có"></td></tr>';
-    }).join("") : "";
-
-    const loading = Boolean(book.loading);
-    const isDraft = Boolean(selectedTest && selectedTest.code === "__new__");
-    const title = selectedTest ? escapeHtmlText(selectedTest.title || "Bài kiểm tra mới") : "Chưa có bài kiểm tra";
-    const date = selectedTest && selectedTest.date ? escapeHtmlText(selectedTest.date) : "";
-
-    return '<div class="max-w-[1500px] mx-auto space-y-6 animate-fade-in pb-10">' +
-        '<section class="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-7">' +
-        '<div class="flex flex-col gap-5"><div class="flex items-center gap-3">' +
-        '<div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="ph-fill ph-chart-line-up text-2xl"></i></div>' +
-        '<div><h2 class="text-2xl md:text-3xl font-black text-slate-800">Điểm học tập</h2><p class="text-sm text-slate-500 font-medium">Nhập nhanh điểm theo bài kiểm tra và lưu trực tiếp lên Google Sheet.</p></div></div>' +
-        '<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full"><button onclick="openConnectedGoogleSheet()" class="px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm flex items-center justify-center gap-2"><i class="ph-bold ph-table"></i> Mở Google Sheet</button>' +
-        '<button onclick="loadScoreBookFromGoogle()" ' + (loading ? "disabled" : "") + ' class="px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60"><i class="ph-bold ph-arrows-clockwise ' + (loading ? "animate-spin" : "") + '"></i> Tải điểm mới nhất</button>' +
-        '<button onclick="openNewScoreTestModal()" class="px-4 py-3 rounded-xl bg-[#0f172a] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"><i class="ph-bold ph-plus-circle"></i> Tạo bài kiểm tra</button></div></div>' +
-        '<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[220px_minmax(280px,1fr)_repeat(4,minmax(120px,160px))] gap-3 mt-6 items-stretch">' +
-        '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Môn học</span><select onchange="selectScoreSubject(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700">' + subjectOptions + '</select></label>' +
-        '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Bài kiểm tra</span><select onchange="selectScoreTest(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700" ' + (!subjectTests.length ? "disabled" : "") + '>' +
-        (testOptions || '<option>Chưa có bài kiểm tra</option>') + '</select></label>' + cards + '</div></section>' +
-        (selectedTest
-            ? '<section class="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden"><div class="p-5 md:p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><div class="flex items-center gap-2"><h3 class="text-xl font-black text-slate-800">' + title + '</h3>' +
-              (isDraft ? '<span class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">Bài mới</span>' : "") +
-              '</div><p class="text-sm text-slate-500 mt-1">' + (date || "Chưa chọn ngày") + ' · Dán một cột điểm từ Excel vào ô đầu tiên để điền nhanh.</p></div>' +
-              '<button id="save-score-book-button" onclick="saveScoreBook()" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black shadow-md flex items-center justify-center gap-2"><i class="ph-bold ph-cloud-arrow-up"></i> Lưu điểm lên Sheet</button></div>' +
-              '<div class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3 text-center w-16">STT</th><th class="px-4 py-3 text-left">Học sinh</th><th class="px-4 py-3 text-center">Điểm</th><th class="px-4 py-3 text-left">Ghi chú</th></tr></thead><tbody>' +
-              (rowsHtml || '<tr><td colspan="4" class="p-12 text-center text-slate-400 font-bold">Chưa có học sinh để nhập điểm.</td></tr>') + '</tbody></table></div></section>'
-            : '<section class="bg-white rounded-[2rem] border-2 border-dashed border-slate-200 p-12 text-center"><div class="w-16 h-16 mx-auto rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-4"><i class="ph-fill ph-exam text-3xl"></i></div><h3 class="text-lg font-black text-slate-700">Chưa có bài kiểm tra môn này</h3><p class="text-sm text-slate-500 mt-1 mb-5">Tạo bài kiểm tra đầu tiên để bắt đầu nhập điểm.</p><button onclick="openNewScoreTestModal()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold">Tạo bài kiểm tra</button></section>') +
-        '</div>';
-}
-
-function requestScoreBookGoogle(mode, params) {
-    return new Promise(function(resolve, reject) {
-        const callbackName = "googleScoreBookCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
-        const script = document.createElement("script");
-        let finished = false;
-        const timeout = setTimeout(function() { finish({ ok: false, message: "Hệ thống phản hồi chậm khi xử lý dữ liệu điểm." }); }, 30000);
-        function cleanup() { clearTimeout(timeout); delete window[callbackName]; script.remove(); }
-        function finish(response) {
-            if (finished) return;
-            finished = true; cleanup();
-            if (!response || !response.ok || !response.scoreBook) {
-                if (response && response.message === "Mã quản trị không chính xác.") clearGoogleAdminKey();
-                reject(new Error((response && response.message) || "Không thể xử lý dữ liệu điểm.")); return;
-            }
-            resolve(response);
-        }
-        window[callbackName] = finish;
-        script.onerror = function() { finish({ ok: false, message: "Không thể kết nối Google Sheet." }); };
-        const query = Object.keys(params || {}).map(function(key) { return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]); }).join("&");
-        script.src = GOOGLE_SHEET_API_URL + "?mode=" + encodeURIComponent(mode) + (query ? "&" + query : "") + "&callback=" + callbackName;
-        document.head.appendChild(script);
-    });
-}
-
-window.loadScoreBookFromGoogle = function loadScoreBookFromGoogle(options) {
-    options = options || {};
-    if (state.scoreBook && state.scoreBook.loading) return;
-    if (options.silent && state.scoreBook && state.scoreBook.loaded) return;
-    const adminKey = getGoogleAdminKey();
-    if (!adminKey) return;
-    state.scoreBook.loading = true;
-    if (state.currentTab === "diem-hoc-tap") renderLayout();
-    requestScoreBookGoogle("score-book", { adminKey: adminKey }).then(function(response) {
-        const oldSubject = state.scoreBook.selectedSubject || "TOAN";
-        const oldTest = state.scoreBook.selectedTestCode || "";
-        state.scoreBook = response.scoreBook;
-        state.scoreBook.selectedSubject = oldSubject;
-        state.scoreBook.selectedTestCode = (state.scoreBook.tests || []).some(function(test) { return test.code === oldTest; }) ? oldTest : "";
-        state.scoreBook.draftTest = null; state.scoreBook.loaded = true; state.scoreBook.loading = false; state.scoreBook.updatedAt = response.updatedAt || "";
-        rememberGoogleAdminKey(adminKey); saveData();
-        if (state.currentTab === "diem-hoc-tap") renderLayout();
-        if (!options.silent) showToast("Đã đồng bộ dữ liệu điểm từ Google Sheet.", "success");
-    }).catch(function(error) {
-        state.scoreBook.loading = false;
-        if (state.currentTab === "diem-hoc-tap") renderLayout();
-        showToast(error.message || "Không thể tải dữ liệu điểm.", "error");
-    });
-};
-
-window.selectScoreSubject = function selectScoreSubject(subjectCode) {
-    state.scoreBook.selectedSubject = subjectCode; state.scoreBook.selectedTestCode = ""; state.scoreBook.draftTest = null; renderLayout();
-};
-
-window.selectScoreTest = function selectScoreTest(testCode) {
-    state.scoreBook.selectedTestCode = testCode; state.scoreBook.draftTest = null; renderLayout();
-};
-
-window.openNewScoreTestModal = function openNewScoreTestModal() {
-    const subjectCode = (state.scoreBook && state.scoreBook.selectedSubject) || "TOAN";
-    const today = new Date();
-    const dateValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
-    document.getElementById("modal-container").innerHTML = `
-        <div id="new-score-test-modal" class="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
-            <div class="bg-white rounded-[2rem] shadow-2xl w-full max-w-xl overflow-hidden">
-                <div class="p-6 border-b border-slate-100 flex items-center justify-between">
-                    <div><h3 class="text-xl font-black text-slate-800">Tạo bài kiểm tra</h3><p class="text-sm text-slate-500 mt-1">Sau khi tạo, bạn có thể dán nhanh điểm từ Excel.</p></div>
-                    <button onclick="closeModal('new-score-test-modal')" class="p-2 rounded-xl hover:bg-slate-100"><i class="ph-bold ph-x text-xl"></i></button>
-                </div>
-                <div class="p-6 space-y-4">
-                    <label class="block"><span class="text-sm font-bold text-slate-600">Môn học</span>
-                        <select id="new-score-subject" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold">
-                            <option value="TOAN" ${subjectCode === "TOAN" ? "selected" : ""}>Toán</option>
-                            <option value="VAN" ${subjectCode === "VAN" ? "selected" : ""}>Văn</option>
-                            <option value="ANH" ${subjectCode === "ANH" ? "selected" : ""}>Anh</option>
-                            <option value="LY" ${subjectCode === "LY" ? "selected" : ""}>Lý</option>
-                            <option value="HOA" ${subjectCode === "HOA" ? "selected" : ""}>Hoá</option>
-                            <option value="SINH" ${subjectCode === "SINH" ? "selected" : ""}>Sinh</option>
-                        </select>
-                    </label>
-                    <label class="block"><span class="text-sm font-bold text-slate-600">Tên bài kiểm tra</span><input id="new-score-title" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold" placeholder="Ví dụ: Kiểm tra chương 1"></label>
-                    <label class="block"><span class="text-sm font-bold text-slate-600">Ngày kiểm tra</span><input id="new-score-date" type="date" value="${dateValue}" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold"></label>
-                </div>
-                <div class="p-6 pt-0 flex justify-end gap-3">
-                    <button onclick="closeModal('new-score-test-modal')" class="px-5 py-3 rounded-xl border border-slate-200 font-bold text-slate-600">Hủy</button>
-                    <button onclick="createScoreTestDraft()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-black">Tiếp tục nhập điểm</button>
-                </div>
-            </div>
-        </div>`;
-};
-
-window.createScoreTestDraft = function createScoreTestDraft() {
-    const subjectCode = document.getElementById("new-score-subject").value;
-    const title = document.getElementById("new-score-title").value.trim();
-    const date = document.getElementById("new-score-date").value;
-    if (!title) return showToast("Vui lòng nhập tên bài kiểm tra.", "error");
-    if (!date) return showToast("Vui lòng chọn ngày kiểm tra.", "error");
-    state.scoreBook.selectedSubject = subjectCode; state.scoreBook.selectedTestCode = "__new__";
-    state.scoreBook.draftTest = { code: "__new__", subjectCode: subjectCode, title: title, date: formatDateForDisplay(date) };
-    closeModal("new-score-test-modal"); renderLayout();
-};
-
-window.handleScoreGridPaste = function handleScoreGridPaste(event, startRow, startColumn) {
-    const text = event.clipboardData && event.clipboardData.getData("text");
-    if (!text || (!text.includes("\t") && !/[\r\n]/.test(text))) return;
-    event.preventDefault();
-    const pastedRows = text.replace(/\r/g, "").split("\n").filter(function(line) { return line.length > 0; }).map(function(line) { return line.split("\t"); });
-    const rows = Array.from(document.querySelectorAll(".score-entry-row"));
-    pastedRows.forEach(function(cells, rowOffset) {
-        const row = rows[startRow + rowOffset]; if (!row) return;
-        const fields = ["score", "note"];
-        cells.forEach(function(value, columnOffset) {
-            const field = fields[startColumn + columnOffset]; if (!field) return;
-            const input = row.querySelector('[data-score-field="' + field + '"]');
-            if (input) input.value = String(value || "").trim();
-        });
-    });
-};
-
-window.saveScoreBook = function saveScoreBook() {
-    const book = state.scoreBook || {};
-    const selectedTest = book.selectedTestCode === "__new__" ? book.draftTest : (book.tests || []).find(function(test) { return test.code === book.selectedTestCode; });
-    if (!selectedTest) return showToast("Vui lòng chọn bài kiểm tra.", "error");
-    const adminKey = getGoogleAdminKey(); if (!adminKey) return;
-    const inputs = Array.from(document.querySelectorAll('[data-score-field="score"]'));
-    const scores = []; let invalidStudent = "";
-    inputs.forEach(function(input) {
-        const code = input.dataset.studentCode;
-        const raw = input.value.trim().replace(",", ".");
-        const noteInput = document.querySelector('[data-score-field="note"][data-student-code="' + code + '"]');
-        if (raw) {
-            const value = Number(raw);
-            if (!Number.isFinite(value) || value < 0 || value > 10) {
-                input.classList.add("border-red-400", "bg-red-50"); if (!invalidStudent) invalidStudent = code;
-            } else input.classList.remove("border-red-400", "bg-red-50");
-        }
-        scores.push({ studentCode: code, score: raw, note: noteInput ? noteInput.value.trim() : "" });
-    });
-    if (invalidStudent) return showToast("Điểm phải nằm trong khoảng 0 đến 10. Vui lòng kiểm tra học sinh " + invalidStudent + ".", "error");
-    const button = document.getElementById("save-score-book-button");
-    if (button) { button.disabled = true; button.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin"></i> Đang lưu...'; }
-    requestScoreBookGoogle("score-book-save", { adminKey: adminKey, scoreData: JSON.stringify({
-        test: { code: selectedTest.code === "__new__" ? "" : selectedTest.code, subjectCode: selectedTest.subjectCode, title: selectedTest.title, date: selectedTest.date },
-        scores: scores
-    }) }).then(function(response) {
-        const subjectCode = selectedTest.subjectCode;
-        state.scoreBook = response.scoreBook; state.scoreBook.selectedSubject = subjectCode;
-        state.scoreBook.selectedTestCode = response.scoreBook.selectedTestCode || ""; state.scoreBook.draftTest = null;
-        state.scoreBook.loaded = true; state.scoreBook.loading = false; state.scoreBook.updatedAt = response.updatedAt || "";
-        rememberGoogleAdminKey(adminKey); saveData(); renderLayout();
-        showToast("Đã lưu điểm lên Google Sheet. Trang PHHS sẽ đọc dữ liệu mới.", "success");
-    }).catch(function(error) {
-        if (button && button.isConnected) { button.disabled = false; button.innerHTML = '<i class="ph-bold ph-cloud-arrow-up"></i> Lưu điểm lên Sheet'; }
-        showToast(error.message || "Không thể lưu điểm.", "error");
-    });
-};
-
         function renderViewTichDiem() {
             const pf = state.pointsForm;
             const isAdd = pf.actionType === 'add';
@@ -3401,6 +2863,11 @@ window.saveScoreBook = function saveScoreBook() {
                     ${summaryHtml}
 
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+                        <div class="sm:col-span-3">
+                            <label for="google-admin-key-input" class="block text-xs font-black uppercase tracking-wide text-slate-500 mb-2">Mã quản trị</label>
+                            <input type="password" id="google-admin-key-input" inputmode="numeric" autocomplete="off" placeholder="Nhập mã quản trị để kết nối Google Sheet" onkeydown="if(event.key === 'Enter') checkGoogleSheetConnection()" class="w-full px-4 py-3.5 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-blueAccent focus:ring-4 focus:ring-blue-100 transition-all">
+                            <p class="mt-2 text-xs text-slate-400">Nếu nhập sai, ô này vẫn được giữ để thầy/cô nhập lại.</p>
+                        </div>
                         <button id="sheet-connection-check-button" onclick="checkGoogleSheetConnection()" class="w-full py-3.5 bg-primary text-white font-black rounded-xl shadow-md hover:bg-secondary transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait">
                             <i class="ph-bold ph-magnifying-glass text-lg"></i>
                             KIỂM TRA KẾT NỐI
@@ -3722,266 +3189,7 @@ window.saveScoreBook = function saveScoreBook() {
         
         function deleteReward(id) { if (confirm("Xóa quà tặng này khỏi cửa hàng?")) { state.rewards = state.rewards.filter(r => r.id !== id); saveData(); renderLayout(); showToast("Đã xóa quà tặng!"); } }
 
-     
-window.bulkStudentRowCounter = 0;
-
-window.openBulkStudentModal = function() {
-    const modalHtml = `
-        <div class="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-3 md:p-5 backdrop-blur-sm animate-fade-in" id="bulk-student-modal">
-            <div class="bg-white rounded-[2rem] shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[94vh]">
-                <div class="p-5 md:p-6 border-b border-slate-100 flex justify-between items-center bg-white">
-                    <div>
-                        <h3 class="font-black text-xl text-[#0f172a] flex items-center gap-3">
-                            <span class="p-2 bg-indigo-100 text-indigo-700 rounded-xl"><i class="ph-bold ph-rows-plus-bottom"></i></span>
-                            NHẬP NHANH HỌC SINH
-                        </h3>
-                        <p class="text-sm text-slate-500 mt-2">Nhập trực tiếp hoặc dán 4 cột từ Excel/Google Sheet. Mã HS và mã tra cứu sẽ được tạo tự động.</p>
-                    </div>
-                    <button onclick="closeModal('bulk-student-modal')" class="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500"><i class="ph-bold ph-x"></i></button>
-                </div>
-                <div class="px-5 md:px-7 py-4 bg-indigo-50/70 border-b border-indigo-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <div class="text-sm text-indigo-800 font-semibold"><i class="ph-bold ph-lightbulb mr-1"></i> Thứ tự khi dán: Họ và tên → SĐT PHHS → Khối thi → Tổng điểm mục tiêu.</div>
-                    <button onclick="addBulkStudentRow()" class="px-4 py-2.5 bg-white text-indigo-700 border border-indigo-200 rounded-xl font-bold text-sm hover:bg-indigo-100"><i class="ph-bold ph-plus mr-1"></i> Thêm dòng</button>
-                </div>
-                <div class="flex-1 overflow-auto custom-scrollbar">
-                    <table class="w-full min-w-[900px] border-collapse">
-                        <thead class="sticky top-0 z-10 bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                            <tr>
-                                <th class="px-4 py-3 text-center w-14">STT</th>
-                                <th class="px-3 py-3 text-left">Họ và tên <span class="text-red-500">*</span></th>
-                                <th class="px-3 py-3 text-left">Số điện thoại PHHS</th>
-                                <th class="px-3 py-3 text-left">Khối thi</th>
-                                <th class="px-3 py-3 text-left">Tổng điểm mục tiêu</th>
-                                <th class="px-3 py-3 w-14"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="bulk-student-rows"></tbody>
-                    </table>
-                </div>
-                <div class="p-5 md:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div id="bulk-student-count" class="text-sm font-bold text-slate-500">0 học sinh có dữ liệu</div>
-                    <div class="flex gap-3 w-full sm:w-auto">
-                        <button onclick="closeModal('bulk-student-modal')" class="flex-1 sm:flex-none px-7 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-100">Hủy</button>
-                        <button id="save-bulk-students-button" onclick="saveBulkStudents()" class="flex-1 sm:flex-none px-8 py-3 bg-[#0f172a] text-white font-black rounded-xl hover:bg-black shadow-lg disabled:opacity-60 disabled:cursor-wait">
-                            <i class="ph-bold ph-cloud-arrow-up mr-1"></i> Lưu danh sách
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    document.getElementById("modal-container").innerHTML = modalHtml;
-    window.bulkStudentRowCounter = 0;
-    for (let index = 0; index < 8; index++) addBulkStudentRow();
-    const firstInput = document.querySelector("#bulk-student-rows [data-field='name']");
-    if (firstInput) firstInput.focus();
-};
-
-window.addBulkStudentRow = function(values) {
-    const tbody = document.getElementById("bulk-student-rows");
-    if (!tbody) return;
-    const row = document.createElement("tr");
-    row.className = "bulk-student-row border-b border-slate-100 hover:bg-indigo-50/30";
-    row.dataset.rowId = String(++window.bulkStudentRowCounter);
-    row.innerHTML = '<td class="bulk-row-number px-4 py-3 text-center text-sm font-bold text-slate-400"></td>' +
-        '<td class="px-3 py-2"><input data-field="name" type="text" placeholder="Nguyễn Văn A" class="w-full min-w-[220px] px-3 py-2.5 border border-slate-200 rounded-xl font-bold text-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
-        '<td class="px-3 py-2"><input data-field="parentPhone" inputmode="tel" type="text" placeholder="0912345678" class="w-full min-w-[155px] px-3 py-2.5 border border-slate-200 rounded-xl font-semibold focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
-        '<td class="px-3 py-2"><input data-field="khoiThi" type="text" placeholder="A00" class="w-full min-w-[110px] px-3 py-2.5 border border-slate-200 rounded-xl font-semibold focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
-        '<td class="px-3 py-2"><input data-field="tongDiemMucTieu" inputmode="decimal" type="text" placeholder="26" class="w-full min-w-[150px] px-3 py-2.5 border border-slate-200 rounded-xl font-semibold focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"></td>' +
-        '<td class="px-3 py-2 text-center"><button type="button" onclick="removeBulkStudentRow(this)" class="w-9 h-9 rounded-xl text-red-500 hover:bg-red-50" title="Xóa dòng"><i class="ph-bold ph-trash"></i></button></td>';
-    tbody.appendChild(row);
-    const data = values || [];
-    ["name", "parentPhone", "khoiThi", "tongDiemMucTieu"].forEach(function(field, column) {
-        row.querySelector("[data-field='" + field + "']").value = String(data[column] || "").trim();
-    });
-    row.querySelectorAll("input").forEach(function(input) {
-        input.addEventListener("input", updateBulkStudentCount);
-        input.addEventListener("paste", handleBulkStudentPaste);
-    });
-    renumberBulkStudentRows();
-    updateBulkStudentCount();
-};
-
-window.removeBulkStudentRow = function(button) {
-    const rows = document.querySelectorAll(".bulk-student-row");
-    if (rows.length <= 1) {
-        rows[0].querySelectorAll("input").forEach(function(input) { input.value = ""; });
-    } else {
-        button.closest("tr").remove();
-    }
-    renumberBulkStudentRows();
-    updateBulkStudentCount();
-};
-
-window.renumberBulkStudentRows = function() {
-    document.querySelectorAll(".bulk-student-row").forEach(function(row, index) {
-        const number = row.querySelector(".bulk-row-number");
-        if (number) number.textContent = String(index + 1);
-    });
-};
-
-window.updateBulkStudentCount = function() {
-    const count = Array.from(document.querySelectorAll(".bulk-student-row")).filter(function(row) {
-        return Array.from(row.querySelectorAll("input")).some(function(input) {
-            return input.value.trim();
-        });
-    }).length;
-    const label = document.getElementById("bulk-student-count");
-    if (label) label.textContent = count + " học sinh có dữ liệu";
-};
-
-window.handleBulkStudentPaste = function(event) {
-    const text = event.clipboardData && event.clipboardData.getData("text");
-    if (!text || (!text.includes("\t") && !/[\r\n]/.test(text))) return;
-    event.preventDefault();
-    const pastedRows = text.replace(/\r/g, "").split("\n").filter(function(line) {
-        return line.trim();
-    }).map(function(line) {
-        return line.split("\t");
-    });
-    if (!pastedRows.length) return;
-
-    const allRows = Array.from(document.querySelectorAll(".bulk-student-row"));
-    const startIndex = allRows.indexOf(event.target.closest("tr"));
-    const fields = ["name", "parentPhone", "khoiThi", "tongDiemMucTieu"];
-
-    while (document.querySelectorAll(".bulk-student-row").length < startIndex + pastedRows.length) {
-        addBulkStudentRow();
-    }
-
-    const targetRows = Array.from(document.querySelectorAll(".bulk-student-row"));
-    pastedRows.forEach(function(cells, rowOffset) {
-        fields.forEach(function(field, column) {
-            if (cells[column] === undefined) return;
-            targetRows[startIndex + rowOffset].querySelector("[data-field='" + field + "']").value = String(cells[column]).trim();
-        });
-    });
-    updateBulkStudentCount();
-};
-
-window.collectBulkStudents = function() {
-    const students = [];
-    const invalidRows = [];
-    document.querySelectorAll(".bulk-student-row").forEach(function(row, index) {
-        const item = {};
-        row.querySelectorAll("input[data-field]").forEach(function(input) {
-            item[input.dataset.field] = input.value.trim();
-            input.classList.remove("border-red-400", "bg-red-50");
-        });
-        const hasData = Object.keys(item).some(function(key) { return item[key]; });
-        if (!hasData) return;
-        if (!item.name) {
-            invalidRows.push(index + 1);
-            row.querySelector("[data-field='name']").classList.add("border-red-400", "bg-red-50");
-            return;
-        }
-        item.parentPhone = String(item.parentPhone || "").replace(/\D/g, "");
-        if (item.tongDiemMucTieu && !Number.isFinite(Number(item.tongDiemMucTieu.replace(",", ".")))) {
-            invalidRows.push(index + 1);
-            row.querySelector("[data-field='tongDiemMucTieu']").classList.add("border-red-400", "bg-red-50");
-            return;
-        }
-        students.push(item);
-    });
-    if (invalidRows.length) {
-        throw new Error("Vui lòng kiểm tra lại dòng " + invalidRows.join(", ") + ".");
-    }
-    if (!students.length) throw new Error("Chưa có học sinh nào để lưu.");
-    return students;
-};
-
-window.requestBulkStudentSaveToGoogle = function(students, adminKey) {
-    return new Promise(function(resolve, reject) {
-        const callbackName = "googleBulkStudentSaveCallback_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
-        const script = document.createElement("script");
-        let finished = false;
-        const timeout = setTimeout(function() {
-            finish({ ok: false, message: "Hệ thống phản hồi chậm khi lưu danh sách." });
-        }, 30000);
-
-        function cleanup() {
-            clearTimeout(timeout);
-            delete window[callbackName];
-            script.remove();
-        }
-        function finish(response) {
-            if (finished) return;
-            finished = true;
-            cleanup();
-            if (!response || !response.ok || !Array.isArray(response.students)) {
-                if (response && response.message === "Mã quản trị không chính xác.") clearGoogleAdminKey();
-                reject(new Error((response && response.message) || "Không thể lưu danh sách lên Google Sheet."));
-                return;
-            }
-            resolve(response);
-        }
-        window[callbackName] = finish;
-        script.onerror = function() {
-            finish({ ok: false, message: "Không thể kết nối để lưu danh sách học sinh." });
-        };
-        script.src = GOOGLE_SHEET_API_URL +
-            "?mode=students-bulk-save&adminKey=" + encodeURIComponent(adminKey) +
-            "&students=" + encodeURIComponent(JSON.stringify(students)) +
-            "&callback=" + callbackName;
-        document.head.appendChild(script);
-    });
-};
-
-window.saveBulkStudents = async function() {
-    let students;
-    try {
-        students = collectBulkStudents();
-    } catch (error) {
-        return showToast(error.message, "error");
-    }
-    const adminKey = getGoogleAdminKey();
-    if (!adminKey) return;
-
-    const button = document.getElementById("save-bulk-students-button");
-    if (button) button.disabled = true;
-    const savedStudents = [];
-
-    try {
-        for (let start = 0; start < students.length; start += 4) {
-            const batch = students.slice(start, start + 4);
-            if (button) button.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin mr-1"></i> Đang lưu ' + Math.min(start + batch.length, students.length) + '/' + students.length;
-            const response = await requestBulkStudentSaveToGoogle(batch, adminKey);
-            savedStudents.push.apply(savedStudents, response.students);
-        }
-
-        savedStudents.forEach(function(student) {
-            const merged = mergeStudentFromGoogle(student);
-            const index = state.students.findIndex(function(item) {
-                return String(item.studentCode || "").trim() === String(student.studentCode || "").trim();
-            });
-            if (index >= 0) state.students[index] = merged;
-            else state.students.push(merged);
-        });
-        rememberGoogleAdminKey(adminKey);
-        saveData();
-        closeModal("bulk-student-modal");
-        renderLayout();
-        showToast("Đã thêm " + savedStudents.length + " học sinh và tự tạo mã truy cập!", "success");
-    } catch (error) {
-        if (savedStudents.length) {
-            savedStudents.forEach(function(student) {
-                const exists = state.students.some(function(item) {
-                    return String(item.studentCode || "").trim() === String(student.studentCode || "").trim();
-                });
-                if (!exists) state.students.push(mergeStudentFromGoogle(student));
-            });
-            saveData();
-            renderLayout();
-        }
-        if (button && button.isConnected) {
-            button.disabled = false;
-            button.innerHTML = '<i class="ph-bold ph-cloud-arrow-up mr-1"></i> Lưu danh sách';
-        }
-        showToast((savedStudents.length ? "Đã lưu " + savedStudents.length + " học sinh. " : "") + (error.message || "Không thể lưu toàn bộ danh sách."), "error");
-    }
-};
-
-function openEditStudentModal(id) {
+     function openEditStudentModal(id) {
             state.editingStudentId = id;
             const s = id ? state.students.find(x => x.id === id) : { name: '', role: '', goal: '', talent: '', group: 'Tổ 1', avatarUrl: '', gender: 'Nữ', dob: '', boardingType: 'Ngoại trú' };
             if (!s && id) return;
@@ -5113,6 +4321,12 @@ window.openEditGroupModal = function(id) {
         }
 
         function getGoogleAdminKey() {
+            const input = document.getElementById("google-admin-key-input");
+            const inputKey = input ? String(input.value || "").trim() : "";
+            if (inputKey) {
+                rememberGoogleAdminKey(inputKey);
+                return inputKey;
+            }
             if (window.googleAdminKey) return window.googleAdminKey;
             try {
                 const savedKey = sessionStorage.getItem("chuyen_tau_google_admin_key");
@@ -5677,7 +4891,6 @@ window.openEditGroupModal = function(id) {
                     ...item,
                     studentCode: remoteStudent.studentCode
                 }));
-                window.parentHomework = response.homework || [];
                 state.teacherComments = (response.comments || []).map(item => ({
                     ...item,
                     studentCode: remoteStudent.studentCode
@@ -5817,12 +5030,19 @@ window.openEditGroupModal = function(id) {
             function finish(response) {
                 cleanup();
                 if (!response || !response.ok || !Array.isArray(response.students)) {
-                    return showToast((response && response.message) || "Không thể đồng bộ danh sách.", "error");
+                    const message = (response && response.message) ||
+                        "Không thể đồng bộ danh sách.";
+                    if (message === "Mã quản trị không chính xác.") {
+                        clearGoogleAdminKey();
+                        window.googleSheetHealthReport = null;
+                        window.googleSheetHealthError = message;
+                        renderLayout();
+                    }
+                    return showToast(message, "error");
                 }
                 state.students = response.students.map(mergeStudentFromGoogle);
                 state.scores = [];
                 state.teacherComments = [];
-                if (state.scoreBook) state.scoreBook.loaded = false;
                 rememberGoogleAdminKey(adminKey);
                 window.googleSpreadsheetUrl = String(
                     response.spreadsheetUrl || window.googleSpreadsheetUrl || ""
@@ -6030,7 +5250,6 @@ window.performDirectLookup = function() {
           if (parentMain) {
             const academicSection = parentMain.children[1];
             if (academicSection) academicSection.insertAdjacentHTML("beforebegin", attendanceHtml);
-            parentMain.insertAdjacentHTML("beforeend", renderParentHomework(studentCode));
             const commentWeek = latestTeacherComment ? String(latestTeacherComment.week || "").replace("TUAN_", "Tuần ") : "";
             const commentText = latestTeacherComment ? escapeHtmlAttr(latestTeacherComment.text) : "Chưa có nhận xét nào từ giáo viên.";
             parentMain.insertAdjacentHTML("beforeend", '<section class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200"><div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">💬</div><div><h3 class="font-black text-xl text-slate-800">Nhận xét của giáo viên</h3>' + (commentWeek ? '<p class="text-sm text-slate-500">Nhận xét mới nhất · ' + commentWeek + '</p>' : '') + '</div></div><p class="text-slate-700 leading-7 whitespace-pre-line">' + commentText + '</p></section>');
@@ -8396,5 +7615,3 @@ window.deleteHistoryRecord = function(studentId, historyId) {
     </script>
 </body>
 </html>
-
-
