@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   apply-fix:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,89 +23,80 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('index.html')
           text = path.read_text(encoding='utf-8')
+          pattern = re.compile(
+              r'\s*window\.submitGoogleAdminKeyRetry\s*=\s*function\(\)\s*\{.*?\n\s*\};(?=\s*\n\s*function getGoogleAdminKey\s*\()',
+              re.S,
+          )
 
-          old = '''        window.submitGoogleAdminKeyRetry = function() {
-              const input = document.getElementById("google-admin-key-retry-input");
-              const key = input ? String(input.value || "").trim() : "";
-              if (!key) {
-                  showToast("Vui lòng nhập mã quản trị.", "error");
-                  if (input) input.focus();
-                  return;
-              }
-              rememberGoogleAdminKey(key);
-              window.closeGoogleAdminKeyRetryModal();
-              showToast("Đã nhận mã mới. Thầy/cô hãy thực hiện lại thao tác.", "success");
-          };'''
+          new = '''
+        window.submitGoogleAdminKeyRetry = function() {
+            const input = document.getElementById("google-admin-key-retry-input");
+            const key = input ? String(input.value || "").trim() : "";
+            if (!key) {
+                showToast("Vui lòng nhập mã quản trị.", "error");
+                if (input) input.focus();
+                return;
+            }
 
-          new = '''        window.submitGoogleAdminKeyRetry = function() {
-              const input = document.getElementById("google-admin-key-retry-input");
-              const key = input ? String(input.value || "").trim() : "";
-              if (!key) {
-                  showToast("Vui lòng nhập mã quản trị.", "error");
-                  if (input) input.focus();
-                  return;
-              }
+            const callbackName = "googleAdminKeyRetryCallback_" +
+                Date.now() + "_" + Math.floor(Math.random() * 10000);
+            const script = document.createElement("script");
+            let finished = false;
+            const timeout = setTimeout(() => finish(null), 15000);
 
-              const callbackName = "googleAdminKeyRetryCallback_" +
-                  Date.now() + "_" + Math.floor(Math.random() * 10000);
-              const script = document.createElement("script");
-              let finished = false;
-              const timeout = setTimeout(() => finish(null), 15000);
+            function cleanup() {
+                clearTimeout(timeout);
+                delete window[callbackName];
+                script.remove();
+            }
 
-              function cleanup() {
-                  clearTimeout(timeout);
-                  delete window[callbackName];
-                  script.remove();
-              }
+            function finish(response) {
+                if (finished) return;
+                finished = true;
+                cleanup();
 
-              function finish(response) {
-                  if (finished) return;
-                  finished = true;
-                  cleanup();
+                if (!response || !response.ok || !Array.isArray(response.sheets)) {
+                    const message = (response && response.message) ||
+                        "Không thể kiểm tra mã quản trị. Vui lòng thử lại.";
+                    showToast(message, "error");
+                    if (input) {
+                        if (isInvalidGoogleAdminKeyMessage(message)) input.value = "";
+                        input.disabled = false;
+                        input.focus();
+                    }
+                    return;
+                }
 
-                  if (!response || !response.ok || !Array.isArray(response.sheets)) {
-                      const message = (response && response.message) ||
-                          "Không thể kiểm tra mã quản trị. Vui lòng thử lại.";
-                      showToast(message, "error");
-                      if (input) {
-                          if (isInvalidGoogleAdminKeyMessage(message)) input.value = "";
-                          input.disabled = false;
-                          input.focus();
-                      }
-                      return;
-                  }
+                rememberGoogleAdminKey(key);
+                window.closeGoogleAdminKeyRetryModal();
+                showToast("Mã quản trị chính xác. Đã lưu mã mới.", "success");
+            }
 
-                  rememberGoogleAdminKey(key);
-                  window.closeGoogleAdminKeyRetryModal();
-                  showToast("Mã quản trị chính xác. Đã lưu mã mới.", "success");
-              }
+            if (input) input.disabled = true;
+            window[callbackName] = finish;
+            script.onerror = () => finish(null);
+            script.src = GOOGLE_SHEET_API_URL +
+                "?mode=connection-check&adminKey=" + encodeURIComponent(key) +
+                "&callback=" + callbackName;
+            document.head.appendChild(script);
+        };'''
 
-              if (input) input.disabled = true;
-              window[callbackName] = finish;
-              script.onerror = () => finish(null);
-              script.src = GOOGLE_SHEET_API_URL +
-                  "?mode=connection-check&adminKey=" + encodeURIComponent(key) +
-                  "&callback=" + callbackName;
-              document.head.appendChild(script);
-          };'''
-
-          count = text.count(old)
+          updated, count = pattern.subn(new, text, count=1)
           if count != 1:
-              raise SystemExit(f'Expected exactly one handler to replace, found {count}')
-
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+              raise SystemExit(f'Expected exactly one submitGoogleAdminKeyRetry handler, found {count}')
+          path.write_text(updated, encoding='utf-8')
           PY
 
-      - name: Commit only the targeted index.html change
+      - name: Commit targeted index.html change
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add index.html
-          git rm .github/workflows/apply-admin-key-retry-fix.yml
           git diff --cached --check
           git commit -m "fix: validate retried admin key before saving"
           git push origin HEAD:fix/validate-admin-key-retry
