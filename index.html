@@ -5120,10 +5120,8 @@ window.openEditGroupModal = function(id) {
         function openGoogleAdminKeyRetryModal() {
             window.setTimeout(() => {
                 if (document.getElementById("google-admin-key-retry-modal")) return;
-                const container = document.getElementById("modal-container");
-                if (!container) return;
-
-                container.innerHTML = `
+                const container = document.body;
+                container.insertAdjacentHTML("beforeend", `
                     <div id="google-admin-key-retry-modal" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
                         <div class="w-full max-w-md rounded-[2rem] bg-white p-6 md:p-8 shadow-2xl border border-slate-100">
                             <div class="w-14 h-14 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mb-5">
@@ -5134,17 +5132,22 @@ window.openEditGroupModal = function(id) {
                             <label for="google-admin-key-retry-input" class="block mt-5 mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Mã quản trị</label>
                             <input type="password" id="google-admin-key-retry-input" inputmode="numeric" autocomplete="off" placeholder="Nhập lại mã quản trị" onkeydown="if(event.key === 'Enter') submitGoogleAdminKeyRetry()" class="w-full px-4 py-3.5 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-blueAccent focus:ring-4 focus:ring-blue-100 transition-all">
                             <div class="mt-6 flex gap-3">
-                                <button onclick="closeModal('google-admin-key-retry-modal')" class="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black hover:bg-slate-50">ĐÓNG</button>
+                                <button onclick="closeGoogleAdminKeyRetryModal()" class="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black hover:bg-slate-50">ĐÓNG</button>
                                 <button onclick="submitGoogleAdminKeyRetry()" class="flex-1 py-3 rounded-xl bg-primary text-white font-black shadow-md hover:bg-secondary">LƯU MÃ MỚI</button>
                             </div>
                         </div>
                     </div>
-                `;
+                `);
 
                 const input = document.getElementById("google-admin-key-retry-input");
                 if (input) input.focus();
             }, 0);
         }
+
+        window.closeGoogleAdminKeyRetryModal = function() {
+            const modal = document.getElementById("google-admin-key-retry-modal");
+            if (modal) modal.remove();
+        };
 
         window.submitGoogleAdminKeyRetry = function() {
             const input = document.getElementById("google-admin-key-retry-input");
@@ -5155,7 +5158,7 @@ window.openEditGroupModal = function(id) {
                 return;
             }
             rememberGoogleAdminKey(key);
-            closeModal("google-admin-key-retry-modal");
+            window.closeGoogleAdminKeyRetryModal();
             showToast("Đã nhận mã mới. Thầy/cô hãy thực hiện lại thao tác.", "success");
         };
 
