@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Nhập điểm GVBM — Bản thử nghiệm</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#22253b;font:16px system-ui,sans-serif}header{background:#211d49;color:white;padding:22px}main{max-width:1100px;margin:auto;padding:24px}h1{font-size:25px;margin:0}h2{font-size:22px}section{background:white;border:1px solid #dfe4ef;border-radius:20px;padding:24px;margin-bottom:20px}button,input,select{font:inherit;padding:12px;border:1px solid #cdd5e5;border-radius:10px}button{cursor:pointer;background:#5555dc;color:white;border:0}button:disabled{opacity:.5;cursor:wait}button.secondary{background:#edf0fa;color:#333866}.row{display:flex;align-items:end;gap:12px;flex-wrap:wrap}.row label{display:grid;gap:8px;flex:1}input,select{max-width:100%;min-width:0}small{color:#616c83}#status{white-space:pre-wrap;padding:12px 0;min-height:44px}table{border-collapse:collapse;width:100%;text-align:left}td,th{padding:12px;border-bottom:1px solid #e7ebf2}td input{width:100%}.scroll{overflow:auto}th:first-child{min-width:220px}.score{min-width:100px;max-width:130px}fieldset{border:1px solid #dfe4ef;border-radius:10px;padding:16px}fieldset label{display:inline-flex;gap:8px;margin:8px}a{color:#4648bc}.hidden{display:none!important}@media(max-width:600px){main{padding:12px}section{padding:16px}.row>*{width:100%}}
+</style>
+</head>
+<body>
+<header><h1 id="heading">Nhập điểm dành cho GVBM</h1><p>Bản thử nghiệm — chưa thay thế trang GVCN đang sử dụng</p></header>
+<main>
+<section id="connection">
+ <h2>Kết nối bản thử nghiệm</h2>
+ <p>Chỉ dùng đường dẫn Apps Script của bản sao thử nghiệm, không dùng file dữ liệu thật.</p>
+ <div class="row"><label>URL Apps Script thử nghiệm<input id="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec"></label><button id="connect">Kết nối</button></div>
+</section>
+<div id="status" role="status" aria-live="polite"></div>
+<section id="login" class="hidden">
+ <h2>Đăng nhập bằng Gmail được GVCN cấp quyền</h2>
+ <p>Không yêu cầu quyền truy cập Google Drive. Điểm chưa lưu sẽ mất nếu đóng trang.</p>
+ <div id="googleSignIn"></div><button id="loadGoogle" class="secondary">Hiện nút đăng nhập Google</button>
+</section>
+<section id="owner" class="hidden">
+ <h2>Phân quyền giáo viên bộ môn</h2>
+ <div class="row"><label>Mã quản trị GVCN<input id="adminKey" type="password" autocomplete="off"></label><button id="loadGrants">Xem danh sách quyền</button></div>
+ <p>GVBM chỉ được đọc và sửa điểm các môn được chọn. Không chia sẻ mã quản trị hoặc quyền sửa toàn bộ Sheet cho GVBM.</p>
+ <label>Gmail giáo viên <input id="email" type="email" placeholder="giaovien@gmail.com"></label>
+ <fieldset id="subjects"><legend>Môn được cấp quyền</legend></fieldset>
+ <button id="grant">Lưu quyền</button>
+ <p><small>Bỏ chọn tất cả các môn rồi lưu để thu hồi quyền. Nhấn vào Gmail trong bảng để chỉnh sửa.</small></p>
+ <div class="scroll"><table><thead><tr><th>Gmail</th><th>Môn được giao</th></tr></thead><tbody id="grants"></tbody></table></div>
+ <p><a id="teacherLink">Mở trang dành cho GVBM</a></p>
+</section>
+<section id="editor" class="hidden">
+ <div class="row"><h2 id="who"></h2><button id="logout" class="secondary">Đăng xuất</button></div>
+ <div class="row"><label>Môn học<select id="subject"></select></label><label>Bài kiểm tra<select id="test"></select></label><button id="reload" class="secondary">Tải điểm mới nhất</button><button id="newTest">Tạo bài kiểm tra</button></div>
+ <div class="row" style="margin-top:16px"><label>Tên bài kiểm tra<input id="title" maxlength="150"></label><label>Ngày kiểm tra<input id="date" type="date"></label></div>
+ <p>Dán một cột điểm từ Excel vào ô điểm đầu tiên. Kiểm tra đúng thứ tự tên học sinh trước khi lưu.</p>
+ <div class="scroll"><table><thead><tr><th>Học sinh</th><th>Điểm</th><th>Ghi chú</th></tr></thead><tbody id="students"></tbody></table></div>
+ <p><button id="save">Lưu điểm</button> <span id="dirty"></span></p>
+</section>
+</main>
+<script>
+'use strict';
+const CLIENT_ID='463948005776-r1khed2hpi7t4jk1n44bopnhg58lcn03.apps.googleusercontent.com';
+const SUBJECTS={TOAN:'Toán',VAN:'Ngữ văn',ANH:'Tiếng Anh',LY:'Vật lí',HOA:'Hóa học',SINH:'Sinh học'};
+const $=id=>document.getElementById(id);
+const manage=new URLSearchParams(location.search).get('manage')==='1';
+let endpoint='',idToken='',book={tests:[],students:[]},allowed=[],busy=false,dirty=false,currentCode='';
+function message(text){$('status').textContent=text;}
+function setDirty(value){dirty=value;$('dirty').textContent=value?'Có thay đổi chưa lưu':'';}
+function canDiscard(){return !dirty||confirm('Có điểm chưa lưu. Bạn có muốn bỏ thay đổi?');}
+function lock(value){busy=value;document.querySelectorAll('button,input,select').forEach(el=>el.disabled=value);}
+async function request(mode,data={}){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+ try{
+ const response=await fetch(endpoint,{method:'POST',redirect:'follow',credentials:'omit',referrerPolicy:'no-referrer',
+ headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({mode,...data}),signal:controller.signal});
+ if(!response.ok)throw Error('Không kết nối được Apps Script.');
+ const result=await response.json();
+ if(!result.ok)throw Error(result.message||'Yêu cầu không thành công.');
+ return result;
+ }catch(error){
+ if(error.name==='AbortError')throw Error('Chưa nhận được phản hồi. Không tự lưu lại; hãy tải điểm mới nhất để kiểm tra trước khi thử lại.');
+ throw error;
+ }finally{clearTimeout(timer);}
+}
+async function run(action){
+ if(busy)return;lock(true);message('Đang xử lý…');
+ try{await action();}catch(error){message(error.message);}
+ finally{lock(false);}
+}
+function initGoogle(){
+ if(!window.google?.accounts?.id){message('Google chưa tải xong. Hãy bấm lại nút đăng nhập sau ít giây.');return;}
+ google.accounts.id.initialize({client_id:CLIENT_ID,auto_select:false,callback:result=>{
+  if(busy||!canDiscard())return;
+  idToken=result.credential;
+  run(async()=>{await loadBook();$('login').classList.add('hidden');$('editor').classList.remove('hidden');message('Đã đăng nhập.');});
+ }});
+ $('googleSignIn').replaceChildren();
+ google.accounts.id.renderButton($('googleSignIn'),{type:'standard',theme:'outline',size:'large',text:'signin_with'});
+}
+function fillSelect(el,entries){
+ el.replaceChildren();entries.forEach(([value,label])=>{const option=document.createElement('option');option.value=value;option.textContent=label;el.appendChild(option);});
+}
+async function loadBook(){
+ const result=await request('teacher-score-book',{idToken});
+ const prior=$('subject').value;
+ book=result.scoreBook;allowed=result.subjects;
+ $('who').textContent=result.email;
+ fillSelect($('subject'),allowed.map(s=>[s,SUBJECTS[s]]));
+ if(allowed.includes(prior))$('subject').value=prior;
+ renderTests();
+}
+function renderTests(){
+ const tests=book.tests.filter(t=>t.subjectCode===$('subject').value);
+ fillSelect($('test'),tests.map(t=>[t.code,t.title]));
+ if(tests.some(t=>t.code===currentCode))$('test').value=currentCode;
+ renderRows();
+}
+function isoDate(value){
+ if(/^\d{4}-\d{2}-\d{2}$/.test(value))return value;
+ const m=String(value||'').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+ return m?m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'):'';
+}
+function renderRows(fresh=false){
+ currentCode=fresh?'':$('test').value;
+ const test=book.tests.find(t=>t.code===currentCode);
+ $('title').value=test?.title||'';
+ const now=new Date();$('date').value=test?isoDate(test.date):[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
+ $('students').replaceChildren();
+ book.students.forEach((student,index)=>{
+ const tr=document.createElement('tr'),identity=document.createElement('td');
+ identity.textContent=(index+1)+'. '+student.name+' · '+student.studentCode;tr.appendChild(identity);
+ ['score','note'].forEach(field=>{
+ const td=document.createElement('td'),input=document.createElement('input');
+ input.dataset.field=field;input.dataset.index=index;input.value=student.scores[currentCode]?.[field]||'';
+ input.setAttribute('aria-label',(field==='score'?'Điểm ':'Ghi chú ')+student.name);
+ if(field==='score'){input.inputMode='decimal';input.className='score';}
+ else input.maxLength=2000;
+ input.addEventListener('input',()=>setDirty(true));
+ if(field==='score')input.addEventListener('paste',event=>{
+ const lines=event.clipboardData.getData('text').replace(/\r/g,'').trimEnd().split('\n');
+ if(lines.length<2)return;event.preventDefault();
+ const inputs=Array.from(document.querySelectorAll('[data-field="score"]'));
+ if(index+lines.length>inputs.length){message('Số dòng dán vượt quá danh sách học sinh.');return;}
+ if(lines.some(line=>line.includes('\t'))){message('Chỉ dán một cột điểm, không dán cột tên.');return;}
+ lines.forEach((value,offset)=>inputs[index+offset].value=value.trim());setDirty(true);
+ });
+ td.appendChild(input);tr.appendChild(td);
+ });
+ $('students').appendChild(tr);
+ });
+ setDirty(fresh);
+}
+async function save(){
+ if(!dirty){message('Chưa có thay đổi để lưu.');return;}
+ if(!$('title').value.trim()||!$('date').value)throw Error('Nhập tên bài kiểm tra và ngày kiểm tra.');
+ const scores=book.students.map((s,index)=>({
+ studentCode:s.studentCode,score:document.querySelector('[data-field="score"][data-index="'+index+'"]').value.trim().replace(',','.'),
+ note:document.querySelector('[data-field="note"][data-index="'+index+'"]').value
+ }));
+ if(scores.some(s=>s.score&&(!Number.isFinite(Number(s.score))||Number(s.score)<0||Number(s.score)>10)))
+ throw Error('Điểm phải từ 0 đến 10. Chưa lưu dữ liệu.');
+ const result=await request('teacher-score-save',{idToken,scoreData:{test:{
+ code:currentCode,subjectCode:$('subject').value,title:$('title').value.trim(),date:$('date').value},scores}});
+ book=result.scoreBook;currentCode=book.selectedTestCode;renderTests();message('Đã lưu điểm.');
+}
+async function loadGrants(){
+ const r=await request('teacher-access-list',{adminKey:$('adminKey').value});
+ $('grants').replaceChildren();
+ r.grants.forEach(grant=>{
+ const tr=document.createElement('tr'),td=document.createElement('td'),button=document.createElement('button'),subjects=document.createElement('td');
+ button.className='secondary';button.textContent=grant.email;button.onclick=()=>{
+ $('email').value=grant.email;document.querySelectorAll('[name="grantSubject"]').forEach(el=>el.checked=grant.subjects.includes(el.value));
+ };td.appendChild(button);subjects.textContent=grant.subjects.map(s=>SUBJECTS[s]).join(', ');tr.append(td,subjects);$('grants').appendChild(tr);
+ });message('Đã tải danh sách quyền.');
+}
+$('connect').onclick=()=>{
+ try{const url=new URL($('endpoint').value.trim());
+ if(url.origin!=='https://script.google.com'||!/^\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url.pathname)||url.search||url.hash)throw Error();
+ endpoint=url.href;$('connection').classList.add('hidden');
+ $(manage?'owner':'login').classList.remove('hidden');message('');
+ if(!manage)initGoogle();
+ }catch(error){message('Vui lòng nhập URL Apps Script /exec hợp lệ.');}
+};
+$('loadGoogle').onclick=initGoogle;
+$('subject').onchange=()=>{if(!canDiscard()){ $('subject').value=book.tests.find(t=>t.code===currentCode)?.subjectCode||allowed[0];return;}currentCode='';renderTests();};
+$('test').onchange=()=>{if(!canDiscard()){$('test').value=currentCode;return;}renderRows();};
+$('newTest').onclick=()=>{if(canDiscard())renderRows(true);};
+$('reload').onclick=()=>{if(canDiscard())run(async()=>{await loadBook();message('Đã tải điểm mới nhất.');});};
+$('save').onclick=()=>run(save);
+['title','date'].forEach(id=>$(id).oninput=()=>setDirty(true));
+$('logout').onclick=()=>{if(!canDiscard())return;idToken='';book={tests:[],students:[]};allowed=[];currentCode='';$('students').replaceChildren();$('editor').classList.add('hidden');$('login').classList.remove('hidden');setDirty(false);google.accounts.id.disableAutoSelect();message('Đã đăng xuất.');};
+$('loadGrants').onclick=()=>run(loadGrants);
+$('grant').onclick=()=>run(async()=>{
+ const subjects=Array.from(document.querySelectorAll('[name="grantSubject"]:checked')).map(el=>el.value);
+ if(!subjects.length&&!confirm('Thu hồi toàn bộ quyền của Gmail này?')){message('Đã hủy.');return;}
+ await request('teacher-access-save',{adminKey:$('adminKey').value,email:$('email').value,subjects});
+ await loadGrants();message(subjects.length?'Đã lưu quyền.':'Đã thu hồi quyền.');
+});
+Object.entries(SUBJECTS).forEach(([code,name])=>{const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.name='grantSubject';input.value=code;label.append(input,document.createTextNode(name));$('subjects').appendChild(label);});
+$('teacherLink').href=location.pathname;
+if(manage)$('heading').textContent='GVCN — Phân quyền giáo viên bộ môn';
+window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
+</script>
+</body>
+</html>
+
