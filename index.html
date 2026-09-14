@@ -1034,7 +1034,7 @@ function prepareWeeklyCommentDraft(){
 async function loadWeeklyComments(){
  const c=weeklyCommentUI();if(c.busy)return;
  if(c.dirty&&!confirm("Tải lại sẽ bỏ nhận xét tuần chưa lưu. Tiếp tục?"))return;
- const key=getGoogleAdminKey();if(!key)return;
+ const key=await getGoogleAdminKey();if(!key)return;
  c.busy=true;renderLayout();
  try{
   const r=await weeklyCommentRequest("weekly-comments",{adminKey:key});
@@ -1102,7 +1102,7 @@ function renderWeeklyComments(){
 async function saveWeeklyCommentsUI(){
  const c=weeklyCommentUI();if(c.busy||!c.loaded)return;
  if(!c.students.length)return showToast("Chưa có học sinh để lưu nhận xét.","error");
- const key=getGoogleAdminKey();if(!key)return;
+ const key=await getGoogleAdminKey();if(!key)return;
  const records=c.students.filter(s=>c.touched[s.studentCode]).map(s=>({studentCode:s.studentCode,text:c.draft[s.studentCode]||""}));
  if(!records.length)return showToast("Bạn chưa thay đổi nhận xét nào.","error");
  const input={weekNumber:c.weekNumber,records:[]};
@@ -1157,7 +1157,7 @@ function prepareHomeworkDraft() {
 async function loadHomework() {
  const h=homeworkUI();if(h.busy)return;
  if(h.dirty&&!confirm("Tải lại sẽ bỏ BTVN chưa lưu. Tiếp tục?"))return;
- const key=getGoogleAdminKey();if(!key)return;
+ const key=await getGoogleAdminKey();if(!key)return;
  h.busy=true;renderLayout();
  try{
  const r=await homeworkRequest("homework",{adminKey:key});h.records=r.records||[];h.students=r.students||[];h.loaded=true;prepareHomeworkDraft();rememberGoogleAdminKey(key);
@@ -1214,7 +1214,7 @@ async function saveHomeworkUI(){
  const h=homeworkUI();if(h.busy||!h.loaded)return;
  const records=h.students.map(s=>({studentCode:s.studentCode,...h.draft[s.studentCode]})).filter(r=>r.status);
  if(!records.length)return showToast("Chưa có trạng thái BTVN để lưu.","error");
- const key=getGoogleAdminKey();if(!key)return;
+ const key=await getGoogleAdminKey();if(!key)return;
  const input={date:h.date,subjectCode:h.subjectCode,title:h.title,records:[]};
  h.busy=true;renderLayout();let saved=0;
  try {
@@ -1362,11 +1362,11 @@ function requestScoreBookGoogle(mode, params) {
     });
 }
 
-window.loadScoreBookFromGoogle = function loadScoreBookFromGoogle(options) {
+window.loadScoreBookFromGoogle = async function loadScoreBookFromGoogle(options) {
     options = options || {};
     if (state.scoreBook && state.scoreBook.loading) return;
     if (options.silent && state.scoreBook && state.scoreBook.loaded) return;
-    const adminKey = getGoogleAdminKey();
+    const adminKey = await getGoogleAdminKey();
     if (!adminKey) return;
     state.scoreBook.loading = true;
     if (state.currentTab === "diem-hoc-tap") renderLayout();
@@ -1456,11 +1456,11 @@ window.handleScoreGridPaste = function handleScoreGridPaste(event, startRow, sta
     });
 };
 
-window.saveScoreBook = function saveScoreBook() {
+window.saveScoreBook = async function saveScoreBook() {
     const book = state.scoreBook || {};
     const selectedTest = book.selectedTestCode === "__new__" ? book.draftTest : (book.tests || []).find(function(test) { return test.code === book.selectedTestCode; });
     if (!selectedTest) return showToast("Vui lòng chọn bài kiểm tra.", "error");
-    const adminKey = getGoogleAdminKey(); if (!adminKey) return;
+    const adminKey = await getGoogleAdminKey(); if (!adminKey) return;
     const inputs = Array.from(document.querySelectorAll('[data-score-field="score"]'));
     const scores = []; let invalidStudent = "";
     inputs.forEach(function(input) {
@@ -3936,7 +3936,7 @@ window.saveBulkStudents = async function() {
     } catch (error) {
         return showToast(error.message, "error");
     }
-    const adminKey = getGoogleAdminKey();
+    const adminKey = await getGoogleAdminKey();
     if (!adminKey) return;
 
     const button = document.getElementById("save-bulk-students-button");
@@ -4216,7 +4216,7 @@ window.saveStudentEdit = async function() {
         talent: document.getElementById("edit-s-talent").value.trim()
     };
 
-    const adminKey = getGoogleAdminKey();
+    const adminKey = await getGoogleAdminKey();
     if (!adminKey) return;
 
     const saveButton = document.getElementById("save-student-button");
@@ -4987,8 +4987,8 @@ window.openEditGroupModal = function(id) {
             });
         }
 
-        function savePublicSettingsToGoogle(className) {
-            const adminKey = getGoogleAdminKey();
+        async function savePublicSettingsToGoogle(className) {
+            const adminKey = await getGoogleAdminKey();
             if (!adminKey) {
                 return Promise.reject(new Error("Chưa nhập mã quản trị."));
             }
@@ -5114,47 +5114,108 @@ window.openEditGroupModal = function(id) {
             return /mã quản trị không chính xác/i.test(String(message || ""));
         }
 
+        function setAdminAuthStatus(message) {
+            let status = document.getElementById("admin-auth-status");
+            if (!message) { if (status) status.remove(); return; }
+            if (!status) {
+                status = document.createElement("div");
+                status.id = "admin-auth-status";
+                status.setAttribute("role", "status");
+                status.setAttribute("aria-live", "polite");
+                status.style.cssText = "position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:2147483647;padding:14px 20px;border-radius:12px;background:#1e1b4b;color:white;box-shadow:0 4px 20px #0003;max-width:90vw";
+                document.body.appendChild(status);
+            }
+            status.textContent = message;
+        }
+
+        function requestAdminKeyCheck(key, mode = "admin-check") {
+            return new Promise((resolve, reject) => {
+                const callback = "adminCheck_" + Date.now() + "_" + Math.floor(Math.random() * 1e8);
+                const script = document.createElement("script");
+                let finished = false;
+                const timer = setTimeout(() => finish(null), 15000);
+                function finish(response) {
+                    if (finished) return;
+                    finished = true;
+                    clearTimeout(timer);
+                    script.remove();
+                    window[callback] = () => {};
+                    setTimeout(() => delete window[callback], 60000);
+                    if (!response) reject(new Error("Chưa kiểm tra được mã do kết nối chậm. Vui lòng thử lại."));
+                    else resolve(response);
+                }
+                window[callback] = finish;
+                script.onerror = () => finish(null);
+                script.src = GOOGLE_SHEET_API_URL + "?" + new URLSearchParams({mode, adminKey:key, callback});
+                document.head.appendChild(script);
+            });
+        }
+
         function clearGoogleAdminKey() {
+            window.googleAdminVerifiedKey = "";
             rememberGoogleAdminKey("");
-            openGoogleAdminKeyRetryModal();
+            if (!window.googleAdminAuthBusy) openGoogleAdminKeyRetryModal();
         }
 
         function openGoogleAdminKeyRetryModal() {
-            // One API rejection may be handled both here and by showToast.
-            if (window.googleAdminKeyRetryPending) return;
+            if (window.googleAdminKeyRetryPending || window.googleAdminAuthBusy) return;
             window.googleAdminKeyRetryPending = true;
-            window.setTimeout(() => {
+            window.setTimeout(async () => {
                 try {
-                    const entered = window.prompt("Nhập mã quản trị GVCN để kết nối Google Sheets:");
-                    const key = String(entered || "").trim();
-                    if (!key) return;
-                    rememberGoogleAdminKey(key);
-                    showToast("Đã nhận mã mới. Thầy/cô hãy thực hiện lại thao tác.", "success");
+                    const key = await getGoogleAdminKey();
+                    if (key) showToast("Mã quản trị hợp lệ. Thầy/cô hãy thực hiện lại thao tác.", "success");
                 } finally {
                     window.googleAdminKeyRetryPending = false;
                 }
             }, 0);
         }
 
-        function getGoogleAdminKey() {
-            if (window.googleAdminKey) return window.googleAdminKey;
+        async function getGoogleAdminKey() {
+            // Do not start duplicate actions while authentication is in progress.
+            if (window.googleAdminAuthBusy) return "";
+            let key = window.googleAdminKey || "";
+            try { key = key || sessionStorage.getItem("chuyen_tau_google_admin_key") || ""; }
+            catch (error) { console.warn("Không thể đọc phiên quản trị."); }
+            if (key && window.googleAdminVerifiedKey === key) return key;
+            window.googleAdminAuthBusy = true;
             try {
-                const savedKey = sessionStorage.getItem("chuyen_tau_google_admin_key");
-                if (savedKey) {
-                    window.googleAdminKey = savedKey;
-                    return savedKey;
+                while (true) {
+                    if (!key) key = String(window.prompt("Nhập mã quản trị GVCN để kết nối Google Sheets:") || "").trim();
+                    if (!key) return "";
+                    setAdminAuthStatus("Đang kiểm tra mã quản trị…");
+                    let response = await requestAdminKeyCheck(key, window.googleAdminLegacyCheck ? "connection-check" : "admin-check");
+                    // Compatibility while the teacher deploys the new Code.gs.
+                    if (!response.ok && /Mã tra cứu phải gồm đúng 5 chữ số/i.test(response.message || "")) {
+                        window.googleAdminLegacyCheck = true;
+                        response = await requestAdminKeyCheck(key, "connection-check");
+                    }
+                    setAdminAuthStatus("");
+                    if (response.ok) {
+                        rememberGoogleAdminKey(key);
+                        window.googleAdminVerifiedKey = key;
+                        return key;
+                    }
+                    if (!isInvalidGoogleAdminKeyMessage(response.message)) {
+                        showToast(response.message || "Không thể kiểm tra mã quản trị.", "error");
+                        return "";
+                    }
+                    rememberGoogleAdminKey("");
+                    window.googleAdminVerifiedKey = "";
+                    key = "";
+                    // Show the error, but do not schedule a second retry prompt.
+                    showToast("Mã quản trị không chính xác.", "error");
                 }
             } catch (error) {
-                console.warn("Không thể đọc phiên quản trị:", error);
+                showToast(error.message || "Không thể kiểm tra mã quản trị.", "error");
+                return "";
+            } finally {
+                setAdminAuthStatus("");
+                window.googleAdminAuthBusy = false;
             }
-            const key = window.prompt("Nhập mã quản trị GVCN để kết nối Google Sheets:");
-            if (!key) return "";
-            rememberGoogleAdminKey(key);
-            return key;
         }
 
-        window.checkGoogleSheetConnection = function() {
-            const adminKey = getGoogleAdminKey();
+        window.checkGoogleSheetConnection = async function() {
+            const adminKey = await getGoogleAdminKey();
             if (!adminKey) return;
 
             const button = document.getElementById("sheet-connection-check-button");
@@ -5236,8 +5297,8 @@ window.openEditGroupModal = function(id) {
             document.head.appendChild(script);
         };
 
-        window.syncAttendanceFromGoogle = function() {
-            const adminKey = getGoogleAdminKey();
+        window.syncAttendanceFromGoogle = async function() {
+            const adminKey = await getGoogleAdminKey();
             if (!adminKey) return;
 
             const button = document.getElementById("attendance-sync-button");
@@ -5374,7 +5435,7 @@ window.openEditGroupModal = function(id) {
         }
 
         async function sendAttendanceToGoogle(records) {
-            const adminKey = getGoogleAdminKey();
+            const adminKey = await getGoogleAdminKey();
             if (!adminKey) throw new Error("Chưa nhập mã quản trị.");
 
             let lastError;
@@ -5747,12 +5808,12 @@ window.openEditGroupModal = function(id) {
             };
         }
 
-        window.generateMissingLookupCodes = function() {
+        window.generateMissingLookupCodes = async function() {
             if (!window.confirm(
                 "Tạo mã tra cứu ngẫu nhiên 5 chữ số cho học sinh chưa có mã hợp lệ? Các mã 5 chữ số hiện có sẽ được giữ nguyên."
             )) return;
 
-            const adminKey = getGoogleAdminKey();
+            const adminKey = await getGoogleAdminKey();
             if (!adminKey) return;
 
             const button = document.getElementById("generate-lookup-codes-button");
@@ -5828,8 +5889,8 @@ window.openEditGroupModal = function(id) {
             document.head.appendChild(script);
         };
 
-        window.syncClassFromGoogle = function(options = {}) {
-            const adminKey = getGoogleAdminKey();
+        window.syncClassFromGoogle = async function(options = {}) {
+            const adminKey = await getGoogleAdminKey();
             if (!adminKey) return;
 
             showToast("Đang đồng bộ danh sách học sinh...", "success");
