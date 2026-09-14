@@ -13,6 +13,12 @@ function doGet(e) {
   const mode = String(parameters.mode || "student").trim().toLowerCase();
 
   try {
+    // Lightweight authentication: never open or scan a spreadsheet here.
+    if (mode === "admin-check") {
+      assertAdminKey(parameters.adminKey);
+      return output({ ok: true }, callback);
+    }
+
     if (mode === "connection-check") {
       assertAdminKey(parameters.adminKey);
 
