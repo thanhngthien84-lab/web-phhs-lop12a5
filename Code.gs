@@ -1378,11 +1378,12 @@ function readScoreBookForAdmin(ss) {
   };
 }
 
-function saveScoreBookForAdmin(ss, input) {
+function saveScoreBookForAdmin(ss, input, teacherIdentity) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
 
   try {
+    if (teacherIdentity) validateTeacherScoreInput(input, teacherIdentity);
     const sheet = ss.getSheetByName("BANG_DIEM_WEB");
     if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
 
@@ -2039,5 +2040,6 @@ function saveHomework(ss, input) {
  return {savedCount:updates.length};
  }finally{lock.releaseLock();}
 }
+
 
 
