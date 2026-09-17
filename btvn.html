@@ -30,17 +30,20 @@ async function action(fn){if(busy)return;busy=true;document.querySelectorAll('bu
 function credentials(){return adminKey?{adminKey}:{token};}
 async function load(){const r=await request(adminKey?'hw-admin-list':'hw-list',credentials());posts=r.posts;renderPosts();}
 function renderPosts(){
- $('posts').innerHTML=posts.length?posts.map(p=>`<article><header><strong class="badge">${esc(p.subject)}</strong><strong>Hạn nộp: ${esc(p.due.split('-').reverse().join('/'))}</strong></header>${p.deleted?'<p>Đã gỡ khỏi bảng của lớp</p>':''}<p class="content">${esc(p.content)}</p><small>Cập nhật ${esc(new Date(p.updatedAt).toLocaleString('vi-VN'))}</small><div class="actions" style="margin-top:14px">${(adminKey||me&&me.studentCode===p.authorCode&&!p.deleted)?`<button class="secondary" data-edit="${esc(p.id)}">Sửa bài</button>`:''}${adminKey?`<button class="secondary" data-history="${esc(p.id)}">Lịch sử / khôi phục</button>${!p.deleted?`<button class="danger" data-delete="${esc(p.id)}">Gỡ bài</button>`:''}`:''}</div></article>`).join(''):'<p class="muted">Chưa có bài tập được đăng.</p>';
+ $('posts').innerHTML=posts.length?posts.map(p=>`<article><header><strong class="badge">${esc(p.subject)}</strong><strong>BTVN ngày: ${esc(formatDate(p.due))}</strong></header>${p.deleted?'<p>Đã gỡ khỏi bảng của lớp</p>':''}<p class="content">${esc(p.content)}</p><small>Cập nhật ${esc(new Date(p.updatedAt).toLocaleString('vi-VN'))}</small><div class="actions" style="margin-top:14px">${(adminKey||me&&me.studentCode===p.authorCode&&!p.deleted)?`<button class="secondary" data-edit="${esc(p.id)}">Sửa bài</button>`:''}${adminKey?`<button class="secondary" data-history="${esc(p.id)}">Lịch sử / khôi phục</button>${!p.deleted?`<button class="danger" data-delete="${esc(p.id)}">Gỡ bài</button>`:''}`:''}</div></article>`).join(''):'<p class="muted">Chưa có bài tập được đăng.</p>';
 }
 function tomorrow(){const d=new Date();d.setDate(d.getDate()+1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function blankDraft(){return {id:crypto.randomUUID(),subject:'',due:tomorrow(),content:''};}
 function renderDrafts(){
- $('draftRows').innerHTML=drafts.map((d,i)=>`<div class="draft" data-draft="${i}"><div class="draft-head"><h3>Môn ${i+1}</h3>${drafts.length>1&&!editing?`<button type="button" class="danger" data-remove-draft="${i}">Xóa môn</button>`:''}</div><div class="row"><label>Môn học<input data-field="subject" list="subjects" maxlength="50" required value="${esc(d.subject)}" placeholder="Chọn hoặc nhập môn"></label><label>Hạn nộp<input data-field="due" type="date" required value="${esc(d.due)}"></label></div><label>Nội dung bài tập<textarea data-field="content" maxlength="1200" required placeholder="Ví dụ: Làm bài 1–5 trang 20, nộp vào tiết Toán ngày mai.">${esc(d.content)}</textarea></label></div>`).join('');
+ $('draftRows').innerHTML=drafts.map((d,i)=>`<div class="draft" data-draft="${i}"><div class="draft-head"><h3>Môn ${i+1}</h3>${drafts.length>1&&!editing?`<button type="button" class="danger" data-remove-draft="${i}">Xóa môn</button>`:''}</div><div class="row"><label>Môn học<input data-field="subject" list="subjects" maxlength="50" required value="${esc(d.subject)}" placeholder="Chọn hoặc nhập môn"></label><label>BTVN ngày<input data-field="due" type="date" required value="${esc(d.due)}"></label></div><label>Nội dung bài tập<textarea data-field="content" maxlength="1200" required placeholder="Ví dụ: Làm bài 1–5 trang 20.">${esc(d.content)}</textarea></label></div>`).join('');
  show('addSubject',!editing);
 }
 function resetEditor(){editing=null;drafts=[blankDraft()];dirty=false;$('editorTitle').textContent='Đăng bài tập';$('saveButton').textContent='Đăng tất cả';renderDrafts();}
-function formatDate(value){return String(value||'').split('-').reverse().join('/');}
-function buildZaloMessage(saved){const now=new Date().toLocaleDateString('vi-VN');return ['📚 BÀI TẬP VỀ NHÀ - '+now,'',...saved.map((p,i)=>(i+1)+'. '+p.subject+'\n'+p.content+'\nHạn nộp: '+formatDate(p.due)),'','Phụ huynh vui lòng nhắc các con hoàn thành bài đúng hạn. Xin cảm ơn!'].join('\n');}
+function formatDate(value){const parts=String(value||'').split('-');return parts.length===3?Number(parts[2])+'/'+Number(parts[1])+'/'+parts[0]:String(value||'');}
+function buildZaloMessage(saved){
+ const groups=new Map();saved.forEach(post=>{if(!groups.has(post.due))groups.set(post.due,[]);groups.get(post.due).push(post);});
+ return Array.from(groups.entries()).map(([date,items])=>'---BTVN ('+formatDate(date)+')---\n\n'+items.map((p,i)=>(i+1)+'. '+p.subject+': '+p.content).join('\n')).join('\n\n');
+}
 function showShareMessage(saved){$('zaloMessage').value=buildZaloMessage(saved);$('shareDialog').showModal();}
 async function confirmSavedPost(input){
  const r=await request(adminKey?'hw-admin-list':'hw-list',credentials());
