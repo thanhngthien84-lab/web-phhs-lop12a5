@@ -32,7 +32,8 @@ for(let i=0;i<10;i++)assert.throws(()=>call('hw-login',{pin:'bad'}));assert.thro
 const html=fs.readFileSync('btvn.html','utf8');new vm.Script(html.match(/<script>([\s\S]*)<\/script>/)[1]);
 assert(html.includes('id="addSubject"'));
 assert(html.includes('id="shareDialog"'));
-assert(html.includes("window.open('https://chat.zalo.me/'"));
+assert(html.includes('id="homeworkDate"'));
+assert(!html.includes('id="openZalo"'));
 assert(html.includes("drafts=drafts.slice(i)"));
 assert(html.includes("confirmSavedPost(input)"));
 assert(html.includes("'---BTVN ('+formatDate(date)+')---"));
