@@ -30,4 +30,8 @@ admin('restore',{eventId:history.events[2].eventId});assert.equal(call('hw-list'
 admin('revoke');assert.equal(call('hw-save',{token:token2,post:JSON.stringify(post)}).authExpired,true);
 for(let i=0;i<10;i++)assert.throws(()=>call('hw-login',{pin:'bad'}));assert.throws(()=>call('hw-login',{pin:'bad'}),/10 phút/);
 const html=fs.readFileSync('btvn.html','utf8');new vm.Script(html.match(/<script>([\s\S]*)<\/script>/)[1]);
-console.log('PASS: admin authorization, one publisher, PIN hashing, login throttling, revoked sessions, ownership, stale edits, retry without duplicates, dates, audit history and restore; frontend syntax.');
+assert(html.includes('id="addSubject"'));
+assert(html.includes('id="shareDialog"'));
+assert(html.includes("window.open('https://chat.zalo.me/'"));
+assert(html.includes("drafts=drafts.slice(i)"));
+console.log('PASS: admin authorization, one publisher, PIN hashing, login throttling, revoked sessions, ownership, stale edits, retry without duplicates, dates, audit history and restore; multi-subject and Zalo sharing UI; frontend syntax.');
