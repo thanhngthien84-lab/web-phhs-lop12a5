@@ -34,4 +34,5 @@ assert(html.includes('id="addSubject"'));
 assert(html.includes('id="shareDialog"'));
 assert(html.includes("window.open('https://chat.zalo.me/'"));
 assert(html.includes("drafts=drafts.slice(i)"));
+assert(html.includes("confirmSavedPost(input)"));
 console.log('PASS: admin authorization, one publisher, PIN hashing, login throttling, revoked sessions, ownership, stale edits, retry without duplicates, dates, audit history and restore; multi-subject and Zalo sharing UI; frontend syntax.');
