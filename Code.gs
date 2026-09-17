@@ -175,6 +175,28 @@ function doGet(e) {
       );
     }
 
+    if (mode === "score-archive" || mode === "score-restore") {
+      assertAdminKey(parameters.adminKey);
+
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const testCode = String(parameters.testCode || "").trim().toUpperCase();
+      const scoreBook = mode === "score-archive"
+        ? archiveScoreTest(ss, testCode)
+        : restoreScoreTest(ss, testCode);
+      return output(
+        {
+          ok: true,
+          updatedAt: new Date().toISOString(),
+          scoreBook: scoreBook
+        },
+        callback
+      );
+    }
+
+    if (mode === "hw-list") {
+      return output({ ok: true, posts: [] }, callback);
+    }
+
     if (mode === "homework" || mode === "homework-save") {
       assertAdminKey(parameters.adminKey);
       const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1374,15 +1396,142 @@ function readScoreBookForAdmin(ss) {
 
   return {
     tests: tests,
-    students: rows
+    students: rows,
+    deletedTests: readArchivedScoreTests(ss)
   };
 }
 
-function saveScoreBookForAdmin(ss, input) {
+function scoreArchiveHeaders() {
+  return ["ArchivedAt", "TestCode", "SubjectCode", "Title", "Date", "Payload"];
+}
+
+function getScoreArchiveSheet(ss, createIfMissing) {
+  let sheet = ss.getSheetByName("DIEM_DA_XOA");
+  if (!sheet && createIfMissing) {
+    sheet = ss.insertSheet("DIEM_DA_XOA");
+    sheet.getRange(1, 1, 1, scoreArchiveHeaders().length)
+      .setValues([scoreArchiveHeaders()]);
+    sheet.setFrozenRows(1);
+    sheet.hideSheet();
+  }
+  return sheet;
+}
+
+function readArchivedScoreTests(ss) {
+  const sheet = getScoreArchiveSheet(ss, false);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 6)
+    .getDisplayValues()
+    .map(row => ({
+      archivedAt: String(row[0] || ""),
+      code: String(row[1] || ""),
+      subjectCode: String(row[2] || ""),
+      title: String(row[3] || ""),
+      date: String(row[4] || "")
+    }))
+    .filter(test => test.code);
+}
+
+function archiveScoreTest(ss, testCode) {
+  if (!/^(TOAN|VAN|ANH|LY|HOA|SINH)_BAI_\d+$/.test(testCode)) {
+    throw new Error("Mã bài kiểm tra không hợp lệ.");
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = ss.getSheetByName("BANG_DIEM_WEB");
+    if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
+    const lastColumn = Math.max(sheet.getLastColumn(), 2);
+    const codes = lastColumn >= 3
+      ? sheet.getRange(3, 3, 1, lastColumn - 2).getDisplayValues()[0]
+      : [];
+    const offset = codes.findIndex(value =>
+      String(value || "").trim().toUpperCase() === testCode
+    );
+    if (offset < 0) throw new Error("Không tìm thấy bài kiểm tra cần xóa.");
+
+    const column = offset + 3;
+    const subjectCode = testCode.split("_BAI_")[0];
+    const title = String(sheet.getRange(4, column).getDisplayValue() || "").trim();
+    const date = String(sheet.getRange(5, column).getDisplayValue() || "").trim();
+    const studentRows = Math.max(sheet.getLastRow() - 5, 0);
+    const payload = studentRows
+      ? sheet.getRange(6, 1, studentRows, 2).getDisplayValues().map((identity, index) => {
+          const cell = sheet.getRange(index + 6, column);
+          return {
+            studentCode: normalizeStudentCode(identity[0]),
+            score: String(cell.getDisplayValue() || "").trim(),
+            note: String(cell.getNote() || "").trim()
+          };
+        }).filter(item => item.studentCode)
+      : [];
+
+    const archive = getScoreArchiveSheet(ss, true);
+    archive.appendRow([
+      new Date().toISOString(), testCode, subjectCode, title, date,
+      JSON.stringify(payload)
+    ]);
+    sheet.deleteColumn(column);
+    SpreadsheetApp.flush();
+    return readScoreBookForAdmin(ss);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function restoreScoreTest(ss, testCode) {
+  const archive = getScoreArchiveSheet(ss, false);
+  if (!archive || archive.getLastRow() < 2) {
+    throw new Error("Không tìm thấy bài kiểm tra đã xóa.");
+  }
+
+  const rows = archive.getRange(2, 1, archive.getLastRow() - 1, 6)
+    .getDisplayValues();
+  let archiveIndex = -1;
+  for (let index = rows.length - 1; index >= 0; index--) {
+    if (String(rows[index][1] || "").trim().toUpperCase() === testCode) {
+      archiveIndex = index;
+      break;
+    }
+  }
+  if (archiveIndex < 0) throw new Error("Không tìm thấy bài kiểm tra đã xóa.");
+
+  const row = rows[archiveIndex];
+  const payload = JSON.parse(String(row[5] || "[]"));
+  const scoreBook = saveScoreBookForAdmin(ss, {
+    test: {
+      code: "",
+      subjectCode: row[2],
+      title: row[3],
+      date: row[4]
+    },
+    scores: payload
+  });
+
+  const restoredCode = scoreBook.selectedTestCode;
+  const scoreSheet = ss.getSheetByName("BANG_DIEM_WEB");
+  const lastColumn = scoreSheet.getLastColumn();
+  const codes = scoreSheet.getRange(3, 3, 1, lastColumn - 2).getDisplayValues()[0];
+  const newOffset = codes.findIndex(value =>
+    String(value || "").trim().toUpperCase() === restoredCode
+  );
+  if (newOffset >= 0) scoreSheet.getRange(3, newOffset + 3).setValue(testCode);
+
+  archive.deleteRow(archiveIndex + 2);
+  SpreadsheetApp.flush();
+  const result = readScoreBookForAdmin(ss);
+  result.selectedTestCode = testCode;
+  return result;
+}
+
+function saveScoreBookForAdmin(ss, input, teacherIdentity) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
 
   try {
+    if (teacherIdentity) validateTeacherScoreInput(input, teacherIdentity);
     const sheet = ss.getSheetByName("BANG_DIEM_WEB");
     if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
 
@@ -2039,5 +2188,4 @@ function saveHomework(ss, input) {
  return {savedCount:updates.length};
  }finally{lock.releaseLock();}
 }
-
 

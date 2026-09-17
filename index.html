@@ -1189,6 +1189,7 @@ function renderHomework(){
  const subjects={TOAN:"Toán",VAN:"Văn",ANH:"Anh",LY:"Lý",HOA:"Hoá",SINH:"Sinh"};
  return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 space-y-5">
  <h2 class="font-black text-2xl">Bài tập về nhà</h2>
+ <p><a href="btvn.html" target="_blank" rel="noopener noreferrer" class="text-blue-700 font-bold underline">Xem bảng giao BTVN của lớp</a> · <a href="btvn.html?admin=1" target="_blank" rel="noopener noreferrer" class="text-blue-700 font-bold underline">Quản lý người đăng BTVN</a></p>
  <div class="flex flex-wrap gap-3">
  <button ${disabled} onclick="loadHomework()" class="${button} text-emerald-700">Tải BTVN mới nhất</button>
  <button ${disabled} onclick="openConnectedGoogleSheet()" class="${button} text-blue-700">Mở Google Sheet</button></div>
@@ -1233,14 +1234,51 @@ async function saveHomeworkUI(){
  finally{h.busy=false;renderLayout();}
 }
 
-function renderParentHomework(studentCode){
- const rows=(window.parentHomework||[]).filter(r=>String(r.studentCode)===String(studentCode));
- const esc=escapeHtmlText,labels=homeworkStatusLabels(),subjects={TOAN:"Toán",VAN:"Văn",ANH:"Anh",LY:"Lý",HOA:"Hoá",SINH:"Sinh"};
- return '<section class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200"><h3 class="font-black text-xl text-slate-800 mb-4">Bài tập về nhà</h3>'+
- (!rows.length?'<p class="text-slate-500">Chưa có ghi nhận BTVN từ giáo viên.</p>':
- '<div class="overflow-x-auto"><table class="w-full min-w-[650px] text-sm"><thead class="bg-slate-50"><tr>'+["Ngày kiểm tra","Môn","Bài tập","Tình trạng","Ghi chú"].map(x=>'<th class="p-3 text-left">'+x+'</th>').join("")+'</tr></thead><tbody>'+
- rows.map(r=>'<tr class="border-b border-slate-100"><td class="p-3">'+esc(formatDateForDisplay(r.date))+'</td><td class="p-3">'+esc(subjects[r.subjectCode]||r.subjectCode)+'</td><td class="p-3">'+esc(r.title||"—")+'</td><td class="p-3 font-bold">'+esc(labels[r.status]||"Chưa ghi nhận")+(r.status==="supplemented"?'<div class="text-xs font-normal mt-1">Ban đầu: '+esc(labels[r.initialStatus]||"—")+(r.supplementedAt?'<br>Bổ sung: '+esc(new Date(r.supplementedAt).toLocaleDateString("vi-VN")):"")+'</div>':"")+'</td><td class="p-3 whitespace-pre-line">'+esc(r.note||"—")+'</td></tr>').join("")+'</tbody></table></div>')+'</section>';
+function parentHomeworkDay(value) {
+ const date=value?new Date(value):new Date();
+ if(Number.isNaN(date.getTime()))return '';
+ const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+ const get=type=>parts.find(p=>p.type===type).value;
+ return get('year')+'-'+get('month')+'-'+get('day');
 }
+function parentHomeworkItems(studentCode) {
+ const subjects={TOAN:'Toán',VAN:'Văn',ANH:'Anh',LY:'Lý',HOA:'Hoá',SINH:'Sinh'};
+ const shared=(window.parentClassHomework||[]).filter(p=>!p.deleted).map(p=>({id:p.id,subject:p.subject,content:p.content,date:parentHomeworkDay(p.createdAt),due:p.due}));
+ const personal=studentCode?(window.parentHomework||[]).filter(r=>String(r.studentCode)===String(studentCode)).map((r,i)=>({id:'record-'+i,subject:subjects[r.subjectCode]||r.subjectCode,content:r.title||'BTVN',date:r.date,due:r.date,status:homeworkStatusLabels()[r.status]||'Chưa ghi nhận',note:r.note||''})):[];
+ return [...shared,...personal];
+}
+function parentHomeworkCards(items,date) {
+ const esc=escapeHtmlText;
+ const rows=items.filter(r=>!date||r.date===date||r.due===date);
+ return rows.length?rows.map(r=>`<article class="text-left rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 mt-3"><div class="flex flex-wrap justify-between gap-2"><strong class="text-indigo-800">${esc(r.subject)}</strong><span class="text-xs text-slate-600">${r.due?'Hạn nộp: '+esc(formatDateForDisplay(r.due)):''}</span></div><p class="text-slate-800 whitespace-pre-wrap break-words mt-2">${esc(r.content)}</p><p class="text-xs text-slate-500 mt-2">Ngày ghi nhận: ${esc(formatDateForDisplay(r.date))}</p>${r.status?`<p class="text-sm font-bold mt-2">${esc(r.status)}</p>`:''}${r.note?`<p class="text-sm text-slate-600 whitespace-pre-wrap mt-1">${esc(r.note)}</p>`:''}</article>`).join(''):'<p class="text-sm text-slate-500 py-4">Không có BTVN được giao hoặc đến hạn trong ngày này.</p>';
+}
+function renderParentHomework(studentCode) {
+ const code=studentCode||'';
+ window.setTimeout(()=>loadParentClassHomework(),0);
+ return `<section id="parent-homework-board" data-student-code="${escapeHtmlText(code)}" class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200 text-left"><h3 class="font-black text-xl text-slate-800">BTVN hôm nay · ${escapeHtmlText(formatDateForDisplay(parentHomeworkDay()))}</h3><p class="text-xs text-slate-500 mt-2">Bài giao trong ngày và bài đến hạn hôm nay.</p><div id="parent-homework-today">${parentHomeworkCards(parentHomeworkItems(code),parentHomeworkDay())}</div><p id="parent-homework-load" role="status" class="text-sm text-slate-500 mt-2">Đang tải bài tập của lớp…</p><details class="mt-3 border-t border-slate-200 pt-3"><summary class="cursor-pointer font-bold text-indigo-700 py-2">Xem lịch sử BTVN các ngày</summary><label class="block text-sm font-bold mt-3">Chọn ngày<input id="parent-homework-date" type="date" value="${parentHomeworkDay()}" onchange="updateParentHomeworkHistory(this.value)" class="block w-full border border-slate-300 rounded-xl p-3 my-2"></label><button type="button" onclick="document.getElementById('parent-homework-date').value='';updateParentHomeworkHistory('')" class="text-indigo-700 font-bold underline text-sm">Xem tất cả các ngày</button><div id="parent-homework-history"></div></details></section>`;
+}
+function updateParentHomeworkHistory(date) {
+ const board=document.getElementById('parent-homework-board');if(!board)return;
+ const items=parentHomeworkItems(board.dataset.studentCode);
+ if(date){document.getElementById('parent-homework-history').innerHTML=parentHomeworkCards(items,date);return;}
+ const dates=[...new Set(items.flatMap(r=>[r.date,r.due]).filter(Boolean))].sort().reverse();
+ document.getElementById('parent-homework-history').innerHTML=dates.length?dates.map(d=>'<h4 class="font-bold mt-5">'+escapeHtmlText(formatDateForDisplay(d))+'</h4>'+parentHomeworkCards(items,d)).join(''):'<p class="text-sm text-slate-500 py-4">Chưa có lịch sử BTVN.</p>';
+}
+async function loadParentClassHomework() {
+ const board=document.getElementById('parent-homework-board');if(!board)return;
+ try {
+ if(!window.parentHomeworkLoading)window.parentHomeworkLoading=homeworkRequest('hw-list',{}).finally(()=>{window.parentHomeworkLoading=null;});
+ const response=await window.parentHomeworkLoading;window.parentClassHomework=response.posts||[];
+ if(document.getElementById('parent-homework-board')!==board)return;
+ document.getElementById('parent-homework-load').textContent='';
+ }catch(error){
+ if(document.getElementById('parent-homework-board')!==board)return;
+ document.getElementById('parent-homework-load').innerHTML='Chưa tải được BTVN mới nhất. <button type="button" class="text-indigo-700 underline font-bold" onclick="loadParentClassHomework()">Thử lại</button>';
+ }
+ document.getElementById('parent-homework-today').innerHTML=parentHomeworkCards(parentHomeworkItems(board.dataset.studentCode),parentHomeworkDay());
+ updateParentHomeworkHistory(document.getElementById('parent-homework-date').value);
+}
+
 
 function renderViewScoreEntry() {
     const book = state.scoreBook || {};
@@ -1264,18 +1302,20 @@ function renderViewScoreEntry() {
     }).join("");
     const testOptions = subjectTests.map(function(test) {
         return '<option value="' + escapeHtmlText(test.code) + '" ' + (selectedTest && selectedTest.code === test.code ? "selected" : "") + ">" +
-            escapeHtmlText(test.title) + (test.date ? " · " + escapeHtmlText(test.date) : "") + "</option>";
+            escapeHtmlText(test.title) + (test.localOnly ? " · Chỉ có trên máy" : "") + (test.date ? " · " + escapeHtmlText(test.date) : "") + "</option>";
     }).join("");
 
     const scoreRowsByCode = {};
     (book.students || []).forEach(function(row) { scoreRowsByCode[String(row.studentCode || "").trim()] = row; });
-    const students = (state.students || []).filter(function(student) { return String(student.studentCode || "").trim(); });
+    const students = [...(state.students || []).filter(student => String(student.studentCode || "").trim())];
+    // Only the current class roster determines which students appear here.
     const savedScores = [];
     if (selectedTest && selectedTest.code && selectedTest.code !== "__new__") {
         students.forEach(function(student) {
             const row = scoreRowsByCode[String(student.studentCode || "").trim()];
             const entry = row && row.scores ? row.scores[selectedTest.code] : null;
-            const value = entry ? Number(String(entry.score || "").replace(",", ".")) : NaN;
+            const raw = entry ? String(entry.score ?? "").trim() : "";
+            const value = raw ? Number(raw.replace(",", ".")) : NaN;
             if (Number.isFinite(value)) savedScores.push(value);
         });
     }
@@ -1296,16 +1336,17 @@ function renderViewScoreEntry() {
         const code = String(student.studentCode || "").trim();
         const row = scoreRowsByCode[code];
         const entry = selectedTest.code && row && row.scores ? row.scores[selectedTest.code] : null;
-        const score = entry ? String(entry.score || "") : "";
-        const note = entry ? String(entry.note || "") : "";
+        const draft = ((state.scoreDrafts || {})[selectedTest.code] || {})[code];
+        const score = draft ? String(draft.score ?? "") : entry ? String(entry.score ?? "") : "";
+        const note = draft ? String(draft.note ?? "") : entry ? String(entry.note || "") : "";
         return '<tr class="score-entry-row border-b border-slate-100 last:border-0">' +
             '<td class="px-4 py-3 text-center text-sm font-bold text-slate-400">' + (index + 1) + '</td>' +
             '<td class="px-4 py-3"><div class="font-bold text-slate-800">' + escapeHtmlText(student.name || "Chưa có tên") +
             '</div><div class="text-xs text-slate-400 mt-0.5">' + escapeHtmlText(code) + '</div></td>' +
-            '<td class="px-4 py-3 w-40"><input data-score-field="score" data-student-code="' + escapeHtmlText(code) +
+            '<td class="px-4 py-3 w-40"><input oninput="scoreDraftChanged()" data-score-field="score" data-student-code="' + escapeHtmlText(code) +
             '" value="' + escapeHtmlText(score) + '" inputmode="decimal" onpaste="handleScoreGridPaste(event,' + index +
             ',0)" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-center font-black text-blue-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="--"></td>' +
-            '<td class="px-4 py-3 min-w-[240px]"><input data-score-field="note" data-student-code="' + escapeHtmlText(code) +
+            '<td class="px-4 py-3 min-w-[240px]"><input oninput="scoreDraftChanged()" data-score-field="note" data-student-code="' + escapeHtmlText(code) +
             '" value="' + escapeHtmlText(note) + '" onpaste="handleScoreGridPaste(event,' + index +
             ',1)" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="Ghi chú nếu có"></td></tr>';
     }).join("") : "";
@@ -1331,11 +1372,11 @@ function renderViewScoreEntry() {
             ? '<section class="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden"><div class="p-5 md:p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><div class="flex items-center gap-2"><h3 class="text-xl font-black text-slate-800">' + title + '</h3>' +
               (isDraft ? '<span class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">Bài mới</span>' : "") +
               '</div><p class="text-sm text-slate-500 mt-1">' + (date || "Chưa chọn ngày") + ' · Dán một cột điểm từ Excel vào ô đầu tiên để điền nhanh.</p></div>' +
-              '<button id="save-score-book-button" onclick="saveScoreBook()" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black shadow-md flex items-center justify-center gap-2"><i class="ph-bold ph-cloud-arrow-up"></i> Lưu điểm lên Sheet</button></div>' +
+              '<button onclick="deleteScoreTest()" class="px-4 py-3 rounded-xl border border-red-200 text-red-700 font-bold">Xóa bài kiểm tra</button><button id="save-score-book-button" onclick="saveScoreBook()" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black shadow-md flex items-center justify-center gap-2"><i class="ph-bold ph-cloud-arrow-up"></i> Lưu điểm lên Sheet</button></div>' +
               '<div class="overflow-x-auto"><table class="w-full min-w-[760px]"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-4 py-3 text-center w-16">STT</th><th class="px-4 py-3 text-left">Học sinh</th><th class="px-4 py-3 text-center">Điểm</th><th class="px-4 py-3 text-left">Ghi chú</th></tr></thead><tbody>' +
               (rowsHtml || '<tr><td colspan="4" class="p-12 text-center text-slate-400 font-bold">Chưa có học sinh để nhập điểm.</td></tr>') + '</tbody></table></div></section>'
             : '<section class="bg-white rounded-[2rem] border-2 border-dashed border-slate-200 p-12 text-center"><div class="w-16 h-16 mx-auto rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-4"><i class="ph-fill ph-exam text-3xl"></i></div><h3 class="text-lg font-black text-slate-700">Chưa có bài kiểm tra môn này</h3><p class="text-sm text-slate-500 mt-1 mb-5">Tạo bài kiểm tra đầu tiên để bắt đầu nhập điểm.</p><button onclick="openNewScoreTestModal()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold">Tạo bài kiểm tra</button></section>') +
-        '</div>';
+        scoreTrashHtml() + '</div>';
 }
 
 function requestScoreBookGoogle(mode, params) {
@@ -1362,40 +1403,21 @@ function requestScoreBookGoogle(mode, params) {
     });
 }
 
-window.loadScoreBookFromGoogle = async function loadScoreBookFromGoogle(options) {
-    options = options || {};
-    if (state.scoreBook && state.scoreBook.loading) return;
-    if (options.silent && state.scoreBook && state.scoreBook.loaded) return;
-    const adminKey = await getGoogleAdminKey();
-    if (!adminKey) return;
-    state.scoreBook.loading = true;
-    if (state.currentTab === "diem-hoc-tap") renderLayout();
-    requestScoreBookGoogle("score-book", { adminKey: adminKey }).then(function(response) {
-        const oldSubject = state.scoreBook.selectedSubject || "TOAN";
-        const oldTest = state.scoreBook.selectedTestCode || "";
-        state.scoreBook = response.scoreBook;
-        state.scoreBook.selectedSubject = oldSubject;
-        state.scoreBook.selectedTestCode = (state.scoreBook.tests || []).some(function(test) { return test.code === oldTest; }) ? oldTest : "";
-        state.scoreBook.draftTest = null; state.scoreBook.loaded = true; state.scoreBook.loading = false; state.scoreBook.updatedAt = response.updatedAt || "";
-        rememberGoogleAdminKey(adminKey); saveData();
-        if (state.currentTab === "diem-hoc-tap") renderLayout();
-        if (!options.silent) showToast("Đã đồng bộ dữ liệu điểm từ Google Sheet.", "success");
-    }).catch(function(error) {
-        state.scoreBook.loading = false;
-        if (state.currentTab === "diem-hoc-tap") renderLayout();
-        showToast(error.message || "Không thể tải dữ liệu điểm.", "error");
-    });
-};
-
 window.selectScoreSubject = function selectScoreSubject(subjectCode) {
+    if(scoreSyncBusy) return;
+    if(state.scoreBook.draftTest) return showToast("Hãy lưu bài mới trước khi đổi bài hoặc môn.", "error");
     state.scoreBook.selectedSubject = subjectCode; state.scoreBook.selectedTestCode = ""; state.scoreBook.draftTest = null; renderLayout();
 };
 
 window.selectScoreTest = function selectScoreTest(testCode) {
+    if(scoreSyncBusy) return;
+    if(state.scoreBook.draftTest) return showToast("Hãy lưu bài mới trước khi đổi bài hoặc môn.", "error");
     state.scoreBook.selectedTestCode = testCode; state.scoreBook.draftTest = null; renderLayout();
 };
 
 window.openNewScoreTestModal = function openNewScoreTestModal() {
+    if(scoreSyncBusy) return;
+    if(state.scoreBook.draftTest) return showToast("Hãy lưu bài mới đang nhập trước.", "error");
     const subjectCode = (state.scoreBook && state.scoreBook.selectedSubject) || "TOAN";
     const today = new Date();
     const dateValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
@@ -1454,45 +1476,138 @@ window.handleScoreGridPaste = function handleScoreGridPaste(event, startRow, sta
             if (input) input.value = String(value || "").trim();
         });
     });
+    scoreDraftChanged();
 };
 
-window.saveScoreBook = async function saveScoreBook() {
-    const book = state.scoreBook || {};
-    const selectedTest = book.selectedTestCode === "__new__" ? book.draftTest : (book.tests || []).find(function(test) { return test.code === book.selectedTestCode; });
-    if (!selectedTest) return showToast("Vui lòng chọn bài kiểm tra.", "error");
-    const adminKey = await getGoogleAdminKey(); if (!adminKey) return;
-    const inputs = Array.from(document.querySelectorAll('[data-score-field="score"]'));
-    const scores = []; let invalidStudent = "";
-    inputs.forEach(function(input) {
-        const code = input.dataset.studentCode;
-        const raw = input.value.trim().replace(",", ".");
-        const noteInput = document.querySelector('[data-score-field="note"][data-student-code="' + code + '"]');
-        if (raw) {
-            const value = Number(raw);
-            if (!Number.isFinite(value) || value < 0 || value > 10) {
-                input.classList.add("border-red-400", "bg-red-50"); if (!invalidStudent) invalidStudent = code;
-            } else input.classList.remove("border-red-400", "bg-red-50");
-        }
-        scores.push({ studentCode: code, score: raw, note: noteInput ? noteInput.value.trim() : "" });
+// Google Sheets is shared storage; local drafts are never silently discarded.
+let scoreSyncBusy = false;
+function scoreBackup() {
+    localStorage.setItem('scoreBookRecoveryV1', JSON.stringify({at:new Date().toISOString(), book:state.scoreBook, drafts:state.scoreDrafts || {}}));
+}
+function scoreMerge(remote, previous, removedCode) {
+    const gone = new Set((remote.deletedTests || []).map(t=>t.code));
+    const known = new Set((remote.tests || []).map(t=>t.code));
+    const local = (previous.tests || []).filter(t=>!known.has(t.code) && !gone.has(t.code) && t.code!==removedCode);
+    remote.tests = [...remote.tests, ...local.map(t=>({...t,localOnly:true}))];
+    const byCode = Object.fromEntries((remote.students || []).map(s=>[String(s.studentCode),s]));
+    (previous.students || []).forEach(s=>{
+        if(!byCode[String(s.studentCode)]) { const row={...s,scores:{}}; remote.students.push(row); byCode[String(s.studentCode)]=row; }
+        local.forEach(t=>{if(s.scores && s.scores[t.code]) byCode[String(s.studentCode)].scores[t.code]=s.scores[t.code];});
     });
-    if (invalidStudent) return showToast("Điểm phải nằm trong khoảng 0 đến 10. Vui lòng kiểm tra học sinh " + invalidStudent + ".", "error");
-    const button = document.getElementById("save-score-book-button");
-    if (button) { button.disabled = true; button.innerHTML = '<i class="ph-bold ph-spinner-gap animate-spin"></i> Đang lưu...'; }
-    requestScoreBookGoogle("score-book-save", { adminKey: adminKey, scoreData: JSON.stringify({
-        test: { code: selectedTest.code === "__new__" ? "" : selectedTest.code, subjectCode: selectedTest.subjectCode, title: selectedTest.title, date: selectedTest.date },
-        scores: scores
-    }) }).then(function(response) {
-        const subjectCode = selectedTest.subjectCode;
-        state.scoreBook = response.scoreBook; state.scoreBook.selectedSubject = subjectCode;
-        state.scoreBook.selectedTestCode = response.scoreBook.selectedTestCode || ""; state.scoreBook.draftTest = null;
-        state.scoreBook.loaded = true; state.scoreBook.loading = false; state.scoreBook.updatedAt = response.updatedAt || "";
-        rememberGoogleAdminKey(adminKey); saveData(); renderLayout();
-        showToast("Đã lưu điểm lên Google Sheet. Trang PHHS sẽ đọc dữ liệu mới.", "success");
-    }).catch(function(error) {
-        if (button && button.isConnected) { button.disabled = false; button.innerHTML = '<i class="ph-bold ph-cloud-arrow-up"></i> Lưu điểm lên Sheet'; }
-        showToast(error.message || "Không thể lưu điểm.", "error");
+    return remote;
+}
+function scoreApply(response, old, removedCode, selection) {
+    state.scoreBook=scoreMerge(response.scoreBook,old,removedCode);
+    Object.assign(state.scoreBook,{selectedSubject:old.selectedSubject||'TOAN',selectedTestCode:selection || old.selectedTestCode||'',loaded:true,loading:false,updatedAt:response.updatedAt});
+    saveData(); if(state.currentTab==='diem-hoc-tap' && (!window.learningSection || window.learningSection==='scores')) renderLayout();
+}
+window.scoreDraftChanged=function() {
+    const code=state.scoreBook.selectedTestCode;
+    state.scoreDrafts=state.scoreDrafts||{};
+    const records={};
+    document.querySelectorAll('[data-score-field]').forEach(input=>{
+        const id=input.dataset.studentCode;
+        records[id]=records[id]||{}; records[id][input.dataset.scoreField]=input.value;
     });
+    state.scoreDrafts[code]=records; saveData();
 };
+window.downloadScoreBackup=function() {
+    scoreBackup();
+    const url=URL.createObjectURL(new Blob([localStorage.getItem('scoreBookRecoveryV1')],{type:'application/json'}));
+    const a=document.createElement('a'); a.href=url; a.download='sao-luu-diem-'+Date.now()+'.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+window.loadScoreBookFromGoogle=async function(options={}) {
+    if(scoreSyncBusy) return;
+    const dirty=Object.keys(state.scoreDrafts||{}).length || state.scoreBook.draftTest;
+    if(dirty) { if(!options.silent) showToast('Có điểm đang nhập. Hãy lưu điểm trước khi tải lại; bản nhập vẫn được giữ.','error'); return; }
+    scoreSyncBusy=true;
+    try {
+        const key=await getGoogleAdminKey(); if(!key) return;
+        scoreBackup(); const old=state.scoreBook;
+        const result=await requestScoreBookGoogle('score-book',{adminKey:key});
+        // A user may start typing while the request is in flight.
+        if(Object.keys(state.scoreDrafts||{}).length || state.scoreBook.draftTest) return;
+        scoreApply(result,old); rememberGoogleAdminKey(key);
+        if(!options.silent) showToast('Đã cập nhật từ Sheet. Các bài chỉ có trên máy vẫn được giữ.','success');
+    } catch(e) { if(!options.silent) showToast(e.message,'error'); }
+    finally {scoreSyncBusy=false;}
+};
+window.saveScoreBook=async function() {
+    if(scoreSyncBusy) return;
+    const old=state.scoreBook, test=old.selectedTestCode==='__new__'?old.draftTest:(old.tests||[]).find(t=>t.code===old.selectedTestCode);
+    if(!test) return showToast('Vui lòng chọn bài kiểm tra.','error');
+    scoreDraftChanged(); scoreBackup();
+    const scores=Object.entries(state.scoreDrafts[test.code]||{}).map(([studentCode,v])=>({studentCode,score:String(v.score||'').trim().replace(',','.'),note:String(v.note||'').trim()}));
+    if(scores.some(s=>s.score && (!Number.isFinite(Number(s.score)) || Number(s.score)<0 || Number(s.score)>10))) return showToast('Điểm phải từ 0 đến 10.','error');
+    scoreSyncBusy=true;
+    const button=document.getElementById('save-score-book-button');
+    if(button) {button.disabled=true;button.textContent='Đang lưu lên Sheet…';}
+    document.querySelectorAll('[data-score-field]').forEach(e=>e.disabled=true);
+    try {
+        const key=await getGoogleAdminKey(); if(!key) return;
+        const payload={test:{...test,code:test.code==='__new__'?'':test.code},scores};
+        let result;
+        try {result=await requestScoreBookGoogle('score-book-save',{adminKey:key,scoreData:JSON.stringify(payload)});}
+        catch(e) {
+            if(!/Không tìm thấy bài kiểm tra cần cập nhật/.test(e.message)) throw e;
+            if(!confirm('Bài “'+test.title+'” chỉ còn trên máy, không có trong Sheet. Tạo lại bài trên Sheet với toàn bộ điểm đang hiển thị?')) return;
+            payload.test.recoverMissing=true; delete payload.test.revision;
+            result=await requestScoreBookGoogle('score-book-save',{adminKey:key,scoreData:JSON.stringify(payload)});
+        }
+        delete state.scoreDrafts[test.code];
+        scoreApply(result,old,test.code,result.scoreBook.selectedTestCode);
+        rememberGoogleAdminKey(key); showToast('Đã lưu lên Google Sheets. PHHS sẽ đọc được điểm này.','success');
+    } catch(e) {showToast(e.message+' Bản nhập vẫn được giữ trên máy.','error');}
+    finally {scoreSyncBusy=false;renderLayout();}
+};
+window.deleteScoreTest=async function() {
+    if(scoreSyncBusy) return;
+    const old=state.scoreBook, test=old.selectedTestCode==='__new__'?old.draftTest:(old.tests||[]).find(t=>t.code===old.selectedTestCode);
+    if(!test) return;
+    if(!confirm('Xóa bài “'+test.title+'”? Có thể khôi phục trong mục Bài đã xóa.')) return;
+    if(test.code==='__new__') {
+        scoreBackup(); state.scoreLocalTrash=state.scoreLocalTrash||[]; state.scoreLocalTrash.push({test,students:[],draft:(state.scoreDrafts||{})[test.code]});
+        old.draftTest=null;old.selectedTestCode='';delete (state.scoreDrafts||{})[test.code];saveData();renderLayout();return;
+    }
+    scoreSyncBusy=true;
+    try {
+        scoreBackup(); const key=await getGoogleAdminKey(); if(!key) return;
+        const current=await requestScoreBookGoogle('score-book',{adminKey:key});
+        if(current.scoreBook.tests.some(t=>t.code===test.code)) {
+            const result=await requestScoreBookGoogle('score-archive',{adminKey:key,testCode:test.code,revision:test.revision||''});
+            delete (state.scoreDrafts||{})[test.code]; scoreApply(result,old,test.code);
+        } else {
+            state.scoreLocalTrash=state.scoreLocalTrash||[];
+            state.scoreLocalTrash.push({test,students:JSON.parse(JSON.stringify(old.students)),draft:(state.scoreDrafts||{})[test.code]});
+            old.tests=old.tests.filter(t=>t.code!==test.code); delete (state.scoreDrafts||{})[test.code];
+            saveData(); renderLayout();
+        }
+        showToast('Đã xóa bài; có thể khôi phục.','success');
+    } catch(e){showToast(e.message,'error');} finally {scoreSyncBusy=false;}
+};
+window.restoreScoreTest=async function(code,local) {
+    if(scoreSyncBusy) return;
+    if(local) {
+        const entry=(state.scoreLocalTrash||[]).find(x=>x.test.code===code); if(!entry) return;
+        if(code==='__new__') {
+            if(state.scoreBook.draftTest) return showToast('Hãy lưu bài mới đang nhập trước.','error');
+            state.scoreBook.draftTest=entry.test;state.scoreBook.selectedTestCode=code;state.scoreBook.selectedSubject=entry.test.subjectCode;state.scoreDrafts=state.scoreDrafts||{};if(entry.draft)state.scoreDrafts[code]=entry.draft;state.scoreLocalTrash=state.scoreLocalTrash.filter(x=>x!==entry);saveData();renderLayout();return;
+        }
+        if(state.scoreBook.tests.some(t=>t.code===code)) return showToast('Mã bài đã tồn tại.','error');
+        const restored=scoreMerge(state.scoreBook,{tests:[entry.test],students:entry.students}); state.scoreBook=restored;
+        if(entry.draft) {state.scoreDrafts=state.scoreDrafts||{};state.scoreDrafts[code]=entry.draft;}
+        state.scoreLocalTrash=state.scoreLocalTrash.filter(x=>x!==entry);saveData();renderLayout();return;
+    }
+    scoreSyncBusy=true;
+    try {const key=await getGoogleAdminKey();if(!key)return;scoreBackup();scoreApply(await requestScoreBookGoogle('score-restore',{adminKey:key,testCode:code}),state.scoreBook);}
+    catch(e){showToast(e.message,'error');}finally{scoreSyncBusy=false;}
+};
+function scoreTrashHtml() {
+    const list=[...(state.scoreBook.deletedTests||[]).map(t=>({...t,local:false})),...(state.scoreLocalTrash||[]).map(x=>({...x.test,local:true}))];
+    return '<div class="flex gap-3 flex-wrap"><button class="p-3 border rounded-xl" onclick="downloadScoreBackup()">Tải bản sao lưu điểm</button></div><details class="mt-3"><summary>Bài đã xóa ('+list.length+')</summary>'+list.map(t=>'<div class="p-3">'+escapeHtmlText(t.title)+' <button class="text-blue-700 font-bold" onclick="restoreScoreTest('+escapeHtmlText(JSON.stringify(t.code))+','+t.local+')">Khôi phục</button></div>').join('')+'</details>';
+}
+setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='diem-hoc-tap' && (!window.learningSection || window.learningSection==='scores') && state.scoreBook.loaded && !scoreSyncBusy) loadScoreBookFromGoogle({silent:true});},60000);
+
 
         function renderViewTichDiem() {
             const pf = state.pointsForm;
@@ -3428,6 +3543,7 @@ window.saveScoreBook = async function saveScoreBook() {
                 { id: 'qua-tang', label: 'Danh mục Quà tặng', icon: 'ph-gift' },
                 { id: 'tich-diem', label: 'Tích điểm', icon: 'ph-star' },
                 { id: 'du-lieu', label: 'Dữ liệu & Đồng bộ', icon: 'ph-cloud-arrow-down' },
+                { id: 'btvn-quyen', label: 'Người đăng BTVN', icon: 'ph-notebook' },
                 { id: 'nguy-hiem', label: 'Vùng nguy hiểm', icon: 'ph-warning-octagon' }
             ].map(tab => {
                 const isActive = state.settingsTab === tab.id;
@@ -3435,7 +3551,9 @@ window.saveScoreBook = async function saveScoreBook() {
             }).join('');
 
             let contentHtml = '';
-            if (state.settingsTab === 'thong-tin') {
+            if (state.settingsTab === 'btvn-quyen') {
+                contentHtml = `<div class="bg-white rounded-2xl p-6"><h2 class="font-bold text-xl">Người đăng bài tập về nhà</h2><p class="my-4">Chọn một học sinh phụ trách. GVCN có thể thu hồi quyền và khôi phục bài sửa nhầm.</p><a href="btvn.html?admin=1" target="_blank" rel="noopener noreferrer" class="text-blue-700 font-bold underline">Mở quản lý BTVN</a></div>`;
+            } else if (state.settingsTab === 'thong-tin') {
                 contentHtml = `
                     <div class="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100 flex flex-col md:flex-row gap-8 items-start">
                         <div class="w-full md:w-1/3 text-center">
@@ -4869,8 +4987,8 @@ window.openEditGroupModal = function(id) {
                 ? ""
                 : '<button onclick="closeModal(\'parent-lookup-modal\')" class="absolute top-6 right-6 text-slate-400 hover:bg-slate-100 rounded-full p-2 transition-colors"><i class="ph-bold ph-x text-xl"></i></button>';
             document.getElementById('modal-container').innerHTML = `
-                <div class="fixed inset-0 ${overlayBackground} z-[100] flex items-center justify-center p-4 animate-fade-in" id="parent-lookup-modal">
-                    <div class="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden flex flex-col relative text-center pt-12 pb-10 px-8">
+                <div class="fixed inset-0 ${overlayBackground} z-[100] overflow-y-auto p-4 animate-fade-in" id="parent-lookup-modal"><div class="w-full max-w-3xl mx-auto py-6">${renderParentHomework('')}
+                    <div class="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md mx-auto mt-6 overflow-hidden flex flex-col relative text-center pt-8 pb-8 px-8">
                         ${closeButton}
                         <div class="w-24 h-24 bg-gradient-to-br from-orange-100 to-amber-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner"><i class="ph-fill ph-student text-5xl text-orange-500"></i></div>
                         <h3 class="font-black text-slate-800 text-3xl mb-2 tracking-tight">Cổng Phụ Huynh</h3>
@@ -4878,13 +4996,13 @@ window.openEditGroupModal = function(id) {
                         <input type="tel" inputmode="numeric" id="lookup-code-input" placeholder="VD: 12345" class="w-full px-5 py-5 bg-slate-50 border-2 border-slate-200 rounded-2xl text-2xl font-black text-center tracking-[0.12em] text-slate-800 focus:border-orange-400 outline-none mb-8 shadow-inner transition-colors" maxlength="5" autocomplete="off" onkeypress="if(event.key === 'Enter') performParentLookup()">
                         <button id="parent-lookup-submit-button" onclick="performParentLookup()" class="w-full py-4.5 bg-gradient-to-r from-orange-400 to-red-500 text-white font-black rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all text-lg tracking-wider disabled:opacity-60 disabled:cursor-wait disabled:hover:translate-y-0">TRA CỨU NGAY</button>
                     </div>
-                </div>
+                </div></div>
             `;
             setTimeout(() => document.getElementById('lookup-code-input').focus(), 100);
         }
 
         // API Google Sheets: chỉ trả về dữ liệu của học sinh khớp mã tra cứu.
-        const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxAOm6rvHIUbC1jq8oCY5yGVLT4y8Wp9J250Yl9lQfK1D1m4zIN7OnHahw3bKzE2nTC/exec";
+        const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbw7QpHI_ktHMi7zQWj5esL9L6m9yv_J3-PmK4V7aUD-YrsekpDu7cI7Ws5D0ab8SZJzLA/exec";
 
         window.googleSpreadsheetUrl = window.googleSpreadsheetUrl || "";
 
@@ -6115,7 +6233,7 @@ window.performDirectLookup = function() {
           if (parentMain) {
             const academicSection = parentMain.children[1];
             if (academicSection) academicSection.insertAdjacentHTML("beforebegin", attendanceHtml);
-            parentMain.insertAdjacentHTML("beforeend", renderParentHomework(studentCode));
+            parentMain.insertAdjacentHTML("afterbegin", renderParentHomework(studentCode));
             const commentWeek = latestTeacherComment ? String(latestTeacherComment.week || "").replace("TUAN_", "Tuần ") : "";
             const commentText = latestTeacherComment ? escapeHtmlAttr(latestTeacherComment.text) : "Chưa có nhận xét nào từ giáo viên.";
             parentMain.insertAdjacentHTML("beforeend", '<section class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200"><div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">💬</div><div><h3 class="font-black text-xl text-slate-800">Nhận xét của giáo viên</h3>' + (commentWeek ? '<p class="text-sm text-slate-500">Nhận xét mới nhất · ' + commentWeek + '</p>' : '') + '</div></div><p class="text-slate-700 leading-7 whitespace-pre-line">' + commentText + '</p></section>');
@@ -7157,8 +7275,10 @@ window.playBellSound = function(idx = 0) {
         window.onDropSeat = function(e, seatId) {
             e.preventDefault();
             e.currentTarget.classList.remove('bg-blue-50', 'border-blue-400', 'ring-4', 'ring-blue-100');
-            const studentId = parseInt(e.dataTransfer.getData('text/plain'));
-            if (!studentId) return;
+            const draggedId = e.dataTransfer.getData('text/plain');
+            const student = state.students.find(s => String(s.id) === draggedId);
+            if (!student) return;
+            const studentId = student.id;
 
             // Xóa học sinh khỏi vị trí cũ
             for (const key in state.seatingChart) {
@@ -7173,8 +7293,10 @@ window.playBellSound = function(idx = 0) {
         window.onDragOverList = function(e) { e.preventDefault(); };
         window.onDropList = function(e) {
             e.preventDefault();
-            const studentId = parseInt(e.dataTransfer.getData('text/plain'));
-            if (!studentId) return;
+            const draggedId = e.dataTransfer.getData('text/plain');
+            const student = state.students.find(s => String(s.id) === draggedId);
+            if (!student) return;
+            const studentId = student.id;
             for (const key in state.seatingChart) {
                 if (state.seatingChart[key] === studentId) delete state.seatingChart[key];
             }
@@ -7361,7 +7483,7 @@ window.playBellSound = function(idx = 0) {
                             
                             <!-- Bọc lưới chỗ ngồi -->
                             <div class="flex-1 overflow-y-auto custom-scrollbar pr-3 pb-6 z-10">
-                                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4 md:gap-5">
+                                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-5">
                                     ${seatsHtml}
                                 </div>
                                 <div class="text-center mt-10 text-[11px] font-black text-slate-300 uppercase tracking-widest flex items-center justify-center gap-4">
