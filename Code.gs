@@ -193,8 +193,8 @@ function doGet(e) {
       );
     }
 
-    if (mode === "hw-list") {
-      return output({ ok: true, posts: [] }, callback);
+    if (mode.indexOf("hw-") === 0) {
+      return output(hwPublishHandle(parameters), callback);
     }
 
     if (mode === "homework" || mode === "homework-save") {
@@ -2188,4 +2188,3 @@ function saveHomework(ss, input) {
  return {savedCount:updates.length};
  }finally{lock.releaseLock();}
 }
-
