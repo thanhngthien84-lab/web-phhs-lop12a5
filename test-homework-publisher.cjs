@@ -38,4 +38,7 @@ assert(html.includes("drafts=drafts.slice(i)"));
 assert(html.includes("confirmSavedPost(input)"));
 assert(html.includes("'---BTVN ('+formatDate(date)+')---"));
 assert(html.includes('BTVN ngày'));
+assert(html.includes('id="viewDate"'));
+assert(html.includes('data-view="week"'));
+assert(html.includes('data-copy-date'));
 console.log('PASS: admin authorization, one publisher, PIN hashing, login throttling, revoked sessions, ownership, stale edits, retry without duplicates, dates, audit history and restore; multi-subject and Zalo sharing UI; frontend syntax.');
