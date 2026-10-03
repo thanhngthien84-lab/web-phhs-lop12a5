@@ -76,6 +76,21 @@
             -moz-osx-font-smoothing: grayscale;
         }
         
+        /* Keep weekly comment inputs within the mobile viewport. */
+        .weekly-comments, .weekly-comments fieldset { min-width: 0; }
+        .weekly-comments input, .weekly-comments textarea { box-sizing: border-box; max-width: 100%; font-size: 16px; }
+        @media (max-width: 639px) {
+            .weekly-comments .weekly-comment-table-wrap { overflow: visible; }
+            .weekly-comments .weekly-comment-table { display: block; min-width: 0; }
+            .weekly-comment-table thead { display: none; }
+            .weekly-comment-table tbody { display: block; }
+            .weekly-comment-table tbody tr { display: grid; grid-template-columns: 32px minmax(0, 1fr); padding: 12px; }
+            .weekly-comment-table tbody td { padding: 0; min-width: 0; overflow-wrap: anywhere; }
+            .weekly-comment-table tbody td:first-child { padding-top: 2px; }
+            .weekly-comment-table .weekly-comment-input { grid-column: 1 / -1; margin-top: 10px; }
+            .weekly-comment-table textarea { display: block; min-height: 112px; line-height: 1.5; scroll-margin-block: 96px; }
+        }
+
         /* Custom Scrollbar for a premium look */
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -965,6 +980,7 @@ function changeLearningSection(section) {
  if(window.learningSection==="comments"&&c.dirty&&!confirm("Nhận xét tuần chưa lưu. Bạn muốn bỏ phần đang sửa?"))return;
  if(window.learningSection==="homework")prepareHomeworkDraft();
  if(window.learningSection==="comments")prepareWeeklyCommentDraft();
+ if(section==="comments"&&c.loaded){c.weekNumber=latestWeeklyCommentWeek();prepareWeeklyCommentDraft();}
  window.learningSection=section;renderLayout();
  if(section==="homework"&&!h.loaded)loadHomework();
  if(section==="comments"&&!c.loaded)loadWeeklyComments();
@@ -996,6 +1012,15 @@ function weeklyCommentRequest(mode,params){
  });
 }
 
+function latestWeeklyCommentWeek(){
+ const c=weeklyCommentUI();
+ const validWeek=value=>Number.isInteger(Number(value))&&Number(value)>=1&&Number(value)<=99;
+ const commentWeeks=c.records.filter(r=>String(r.text||"").trim()&&validWeek(r.weekNumber)).map(r=>Number(r.weekNumber));
+ if(commentWeeks.length)return Math.max(...commentWeeks);
+ const weeks=c.weeks.filter(validWeek).map(Number);
+ return weeks.length?Math.max(...weeks):1;
+}
+
 function prepareWeeklyCommentDraft(){
  const c=weeklyCommentUI();c.draft={};c.touched={};
  c.students.forEach(s=>{c.draft[s.studentCode]="";});
@@ -1011,7 +1036,7 @@ async function loadWeeklyComments(){
  try{
   const r=await weeklyCommentRequest("weekly-comments",{adminKey:key});
   c.records=r.comments||[];c.students=r.students||[];c.weeks=r.weeks||[];
-  if(!c.loaded)c.weekNumber=c.weeks.length?Math.max(...c.weeks.map(Number)):1;
+  c.weekNumber=latestWeeklyCommentWeek();
   c.loaded=true;prepareWeeklyCommentDraft();rememberGoogleAdminKey(key);
  }catch(e){showToast(e.message,"error");}
  finally{c.busy=false;if(window.learningSection==="comments")renderLayout();}
@@ -1051,7 +1076,7 @@ function renderWeeklyComments(){
  const c=weeklyCommentUI(),esc=escapeHtmlText,disabled=c.busy?"disabled":"";
  const button="px-4 py-3 rounded-xl border font-bold disabled:opacity-50";
  const filled=Object.values(c.draft).filter(x=>String(x).trim()).length;
- return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 space-y-5">
+ return `<section class="weekly-comments bg-white rounded-3xl border border-slate-200 p-5 md:p-7 space-y-5">
  <div><h2 class="font-black text-2xl">Nhận xét học sinh theo tuần</h2><p class="text-slate-500 mt-1">Nhập trực tiếp hoặc dán một cột nhận xét từ Excel/Google Sheet.</p></div>
  <div class="flex flex-wrap gap-3">
   <button ${disabled} onclick="loadWeeklyComments()" class="${button} text-emerald-700">Tải nhận xét mới nhất</button>
@@ -1064,9 +1089,9 @@ function renderWeeklyComments(){
    <label class="font-bold">Tuần<input aria-label="Số tuần nhận xét" type="number" min="1" max="99" value="${c.weekNumber}" onchange="changeWeeklyCommentWeek(this.value)" class="block mt-2 w-full border rounded-xl p-3"></label>
    <div><p id="weekly-comment-count" class="font-bold text-indigo-700">${filled}/${c.students.length} học sinh có nhận xét</p><p class="text-sm text-slate-500 mt-1">Dán cả một cột vào ô đầu tiên để điền nhanh theo đúng thứ tự danh sách.</p></div>
   </div>
-  <div class="overflow-x-auto border rounded-2xl"><table class="w-full min-w-[760px] text-sm">
+  <div class="weekly-comment-table-wrap overflow-x-auto border rounded-2xl"><table class="weekly-comment-table w-full min-w-[760px] text-sm">
    <thead class="bg-slate-50"><tr><th class="p-3 text-left w-16">STT</th><th class="p-3 text-left w-64">Học sinh</th><th class="p-3 text-left">Nhận xét tuần ${c.weekNumber}</th></tr></thead>
-   <tbody>${c.students.map((s,i)=>`<tr class="border-t border-slate-100"><td class="p-3 text-slate-500">${i+1}</td><td class="p-3"><div class="font-bold">${esc(s.name)}</div><div class="text-xs text-slate-500">${esc(s.studentCode)}</div></td><td class="p-3"><textarea aria-label="Nhận xét ${esc(s.name)}" maxlength="1000" rows="2" oninput="editWeeklyComment(${i},this.value)" onpaste="pasteWeeklyComments(event,${i})" class="w-full border rounded-xl p-3 resize-y" placeholder="Nhập nhận xét cho học sinh">${esc(c.draft[s.studentCode]||"")}</textarea></td></tr>`).join("")||'<tr><td colspan="3" class="p-5 text-slate-500">Chưa có học sinh trong Sheet.</td></tr>'}</tbody>
+   <tbody>${c.students.map((s,i)=>`<tr class="border-t border-slate-100"><td class="p-3 text-slate-500">${i+1}</td><td class="p-3"><div class="font-bold">${esc(s.name)}</div><div class="text-xs text-slate-500">${esc(s.studentCode)}</div></td><td class="weekly-comment-input p-3"><textarea aria-label="Nhận xét ${esc(s.name)}" maxlength="1000" rows="2" oninput="editWeeklyComment(${i},this.value)" onpaste="pasteWeeklyComments(event,${i})" class="w-full border rounded-xl p-3 resize-y" placeholder="Nhập nhận xét cho học sinh">${esc(c.draft[s.studentCode]||"")}</textarea></td></tr>`).join("")||'<tr><td colspan="3" class="p-5 text-slate-500">Chưa có học sinh trong Sheet.</td></tr>'}</tbody>
   </table></div>
  </fieldset>`}</section>`;
 }
