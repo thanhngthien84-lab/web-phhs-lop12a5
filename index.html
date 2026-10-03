@@ -130,6 +130,9 @@
             .print\:hidden { display: none !important; }
         }
     </style>
+    <link rel="stylesheet" href="./teacher-mobile.css?v=1">
+    <script src="./teacher-mobile.js?v=1" defer></script>
+    <script src="./teacher-auth.js?v=1" defer></script>
 </head>
 <body>
     <!-- App Mount Points -->
@@ -142,7 +145,7 @@
     currentTab: 'tong-quan',
     auth: { loggedIn: true, role: 'gvcn' }, 
             theme: { month: "CHỦ ĐIỂM THÁNG", title: "CHUYẾN TÀU THANH XUÂN", bannerUrl: "", bannerColorClass: "from-[#1e1b4b] to-[#312e81]" },
-            admin: { name: "Giáo Viên", role: "Giáo viên chủ nhiệm", avatarUrl: "", className: "LỚP 12A1", classAvatarUrl: "" },
+            admin: { name: "Giáo Viên", role: "Giáo viên chủ nhiệm", avatarUrl: "", className: "LỚP 12A5", classAvatarUrl: "" },
             tasks: [], 
             journeys: [],
             settings: { sidebarPosition: 'left', deductStarsOnRedeem: true },
@@ -204,7 +207,7 @@
         const menuItems = [
             { id: 'tong-quan', icon: 'ph-squares-four', label: 'Trang chủ' },
             { id: 'hoc-sinh', icon: 'ph-users', label: 'Học sinh' },
-            { id: 'diem-hoc-tap', icon: 'ph-chart-line-up', label: 'Điểm học tập' },
+            { id: 'diem-hoc-tap', icon: 'ph-chart-line-up', label: 'Học tập' },
             { id: 'thoi-khoa-bieu', icon: 'ph-calendar-list', label: 'Thời khóa biểu' },
             { id: 'so-do-lop', icon: 'ph-grid-four', label: 'Sơ đồ lớp' },
             { id: 'doi-qua', icon: 'ph-gift', label: 'Quà tặng' },
@@ -266,7 +269,7 @@
             if (!state.theme.bannerColorClass) state.theme.bannerColorClass = "from-[#1e1b4b] to-[#312e81]";
             if (state.theme.teacherMsgTitle === "CÔ THÙY NHẮN") state.theme.teacherMsgTitle = "Thầy/cô muốn gửi gắm";
             if (state.theme.teacherMsgSign === "Cô Đỗ Thị Thùy") state.theme.teacherMsgSign = "";
-            if (!state.admin) state.admin = { name: "Giáo Viên", role: "Giáo viên chủ nhiệm", avatarUrl: "", className: "LỚP 12A1", classAvatarUrl: "" };
+            if (!state.admin) state.admin = { name: "Giáo Viên", role: "Giáo viên chủ nhiệm", avatarUrl: "", className: "LỚP 12A5", classAvatarUrl: "" };
             if (!state.settings) state.settings = { sidebarPosition: 'left', deductStarsOnRedeem: true };
             if (!state.attendanceRecords) state.attendanceRecords = {};
             if (!state.scores) state.scores = [];
@@ -441,43 +444,12 @@ function renderSidebar() {
 }
 // --- THANH ĐIỀU HƯỚNG NẰM DƯỚI ĐÁY (CHỈ HIỂN THỊ TRÊN ĐIỆN THOẠI) ---
 function renderBottomNav() {
-    let activeMenuItems = menuItems;
-    if (state.auth && state.auth.role === 'bancansu') {
-        activeMenuItems = menuItems.filter(item => ['tong-quan', 'hoc-sinh', 'thoi-khoa-bieu', 'diem-danh'].includes(item.id));
-    } else if (state.auth && state.auth.role === 'bgh') {
-        activeMenuItems = menuItems.filter(item => ['tong-quan', 'hoc-sinh', 'thoi-khoa-bieu', 'so-do-lop', 'diem-danh', 'bao-cao', 'tram-dong-hanh'].includes(item.id));
-    }
-
-    const menuHtml = activeMenuItems.map(item => {
-        const isActive = state.currentTab === item.id;
-        
-        // Căn chỉnh giao diện nút y như mẫu ảnh của cô
-        const activeClass = isActive 
-            ? "text-white bg-blue-600 shadow-[0_4px_15px_rgba(37,99,235,0.4)] transform -translate-y-1.5" 
-            : "text-[#94a3b8] hover:text-white hover:bg-white/5";
-
-        // Xử lý các nút bấm đặc biệt
-        let onclickAction = `switchTab('${item.id}')`;
-        if (item.id === 'dong-ho') onclickAction = 'openTimerDrawer()';
-        if (item.id === 'tich-diem') onclickAction = `switchTab('cai-dat'); switchSettingsTab('tich-diem');`;
-
-        return `
-        <button onclick="${onclickAction}" class="flex flex-col items-center justify-center min-w-[70px] w-20 py-2 rounded-[1rem] transition-all duration-300 ${activeClass}">
-            <i class="${isActive ? 'ph-fill' : 'ph-bold'} ${item.icon} text-[22px] mb-1"></i>
-            <span class="text-[10px] font-bold whitespace-nowrap tracking-wide">${item.label}</span>
-        </button>
-        `;
-    }).join('');
-
-    return `
-        <!-- Thẻ nav có chứa 'md:hidden' nghĩa là trên Máy tính nó sẽ hoàn toàn tàng hình -->
-        <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-[#1e1b4b] border-t border-indigo-900 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] z-50 overflow-x-auto pb-1 custom-scrollbar">
-            <div class="absolute inset-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
-            <div class="flex items-center gap-1.5 px-3 pt-2 pb-2 relative z-10 w-max min-w-full">
-                ${menuHtml}
-            </div>
-        </nav>
-    `;
+    let allowed = menuItems;
+    if (state.auth && state.auth.role === 'bancansu') allowed = menuItems.filter(item => ['tong-quan','hoc-sinh','thoi-khoa-bieu','diem-danh'].includes(item.id));
+    else if (state.auth && state.auth.role === 'bgh') allowed = menuItems.filter(item => ['tong-quan','hoc-sinh','thoi-khoa-bieu','so-do-lop','diem-danh','bao-cao','tram-dong-hanh'].includes(item.id));
+    const primary = ['tong-quan','hoc-sinh','diem-hoc-tap','diem-danh'].map(id => allowed.find(item => item.id === id)).filter(Boolean);
+    if (primary.length < 4) { const extra = allowed.find(item => !primary.includes(item)); if (extra) primary.push(extra); }
+    return '<nav class="teacher-mobile-nav print:hidden" aria-label="Điều hướng quản lý">' + primary.map(item => '<button type="button" '+(state.currentTab===item.id?'aria-current="page" ':'')+'onclick="teacherMobileNavigate(\''+item.id+'\')"><i class="ph-bold '+item.icon+'"></i><span>'+item.label+'</span></button>').join('') + '<button type="button" data-teacher-menu aria-expanded="false" aria-controls="teacher-menu-layer" onclick="openTeacherMobileMenu()"><i class="ph-bold ph-squares-four"></i><span>Thêm</span></button></nav>';
 }
 
 function renderHeader() {
@@ -496,7 +468,7 @@ function renderHeader() {
     return `
         <header class="glass sticky top-0 px-6 py-4 flex justify-between items-center z-10 flex-shrink-0 print:hidden shadow-sm">
             <div class="flex items-center gap-3">
-                <button class="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-xl" onclick="alert('Tính năng menu di động đang phát triển')"><i class="ph-bold ph-list text-xl"></i></button>
+                <button class="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-xl" data-teacher-menu aria-label="Mở menu quản lý" aria-expanded="false" aria-controls="teacher-menu-layer" onclick="openTeacherMobileMenu()"><i class="ph-bold ph-list text-xl"></i></button>
                 <h2 class="text-xl font-black text-slate-800 tracking-tight hidden md:block capitalize">${menuItems.find(m => m.id === state.currentTab)?.label || 'Bảng điều khiển'}</h2>
             </div>
             
@@ -1367,7 +1339,7 @@ function renderViewScoreEntry() {
         '<section class="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-7">' +
         '<div class="flex flex-col gap-5"><div class="flex items-center gap-3">' +
         '<div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="ph-fill ph-chart-line-up text-2xl"></i></div>' +
-        '<div><h2 class="text-2xl md:text-3xl font-black text-slate-800">Điểm học tập</h2><p class="text-sm text-slate-500 font-medium">Nhập nhanh điểm theo bài kiểm tra và lưu trực tiếp lên Google Sheet.</p></div></div>' +
+        '<div><h2 class="text-2xl md:text-3xl font-black text-slate-800">Học tập</h2><p class="text-sm text-slate-500 font-medium">Nhập nhanh điểm theo bài kiểm tra và lưu trực tiếp lên Google Sheet.</p></div></div>' +
         '<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full"><button onclick="openConnectedGoogleSheet()" class="px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm flex items-center justify-center gap-2"><i class="ph-bold ph-table"></i> Mở Google Sheet</button>' +
         '<button onclick="loadScoreBookFromGoogle()" ' + (loading ? "disabled" : "") + ' class="px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60"><i class="ph-bold ph-arrows-clockwise ' + (loading ? "animate-spin" : "") + '"></i> Tải điểm mới nhất</button>' +
         '<button onclick="openNewScoreTestModal()" class="px-4 py-3 rounded-xl bg-[#0f172a] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"><i class="ph-bold ph-plus-circle"></i> Tạo bài kiểm tra</button></div></div>' +
@@ -3523,6 +3495,11 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                     </div>
 
                     ${summaryHtml}
+                    <div class="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-slate-700">
+                        <p>Muốn tự đồng bộ khi mở web: nhập mã một lần và chọn “Ghi nhớ trên thiết bị cá nhân trong 30 ngày”.</p>
+                        <button type="button" onclick="configureTeacherDevice()" class="mt-3 mr-4 min-h-[44px] font-bold text-indigo-700 underline">Kết nối và ghi nhớ thiết bị</button>
+                        <button type="button" onclick="forgetTeacherDevice()" class="mt-3 min-h-[44px] font-bold text-indigo-700 underline">Quên kết nối trên thiết bị này</button>
+                    </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
                         <button id="sheet-connection-check-button" onclick="checkGoogleSheetConnection()" class="w-full py-3.5 bg-primary text-white font-black rounded-xl shadow-md hover:bg-secondary transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-wait">
@@ -5276,6 +5253,7 @@ window.openEditGroupModal = function(id) {
                     sessionStorage.setItem("chuyen_tau_google_admin_key", window.googleAdminKey);
                 } else {
                     sessionStorage.removeItem("chuyen_tau_google_admin_key");
+                    if (typeof clearTeacherSavedAccess === "function") clearTeacherSavedAccess();
                 }
             } catch (error) {
                 console.warn("Không thể lưu phiên quản trị:", error);
@@ -5300,26 +5278,37 @@ window.openEditGroupModal = function(id) {
             status.textContent = message;
         }
 
-        function requestAdminKeyCheck(key, mode = "admin-check") {
+        function requestAdminKeyCheck(key, mode = "admin-check", attempt = 0) {
             return new Promise((resolve, reject) => {
                 const callback = "adminCheck_" + Date.now() + "_" + Math.floor(Math.random() * 1e8);
                 const script = document.createElement("script");
                 let finished = false;
-                const timer = setTimeout(() => finish(null), 15000);
-                function finish(response) {
+                const timer = setTimeout(() => finish(null, "timeout"), 45000);
+                function finish(response, failureReason) {
                     if (finished) return;
                     finished = true;
                     clearTimeout(timer);
                     script.remove();
                     window[callback] = () => {};
                     setTimeout(() => delete window[callback], 60000);
-                    if (!response) reject(new Error("Chưa kiểm tra được mã do kết nối chậm. Vui lòng thử lại."));
+                    if (!response) {
+                        const error = new Error(failureReason === "network"
+                            ? "Không kết nối được Google sau hai lần thử. Hãy thử đổi Wi-Fi/4G và mở trực tiếp link Web App để kiểm tra quyền truy cập."
+                            : "Google chưa phản hồi sau 45 giây. Vui lòng kiểm tra mạng và thử lại.");
+                        error.connectionFailure = failureReason === "network";
+                        reject(error);
+                    }
                     else resolve(response);
                 }
-                window[callback] = finish;
-                script.onerror = () => finish(null);
+                window[callback] = response => finish(response);
+                script.onerror = () => finish(null, "network");
                 script.src = GOOGLE_SHEET_API_URL + "?" + new URLSearchParams({mode, adminKey:key, callback});
                 document.head.appendChild(script);
+            }).catch(error => {
+                if (error.connectionFailure && attempt === 0) {
+                    return requestAdminKeyCheck(key, mode, 1);
+                }
+                throw error;
             });
         }
 
@@ -5342,48 +5331,8 @@ window.openEditGroupModal = function(id) {
             }, 0);
         }
 
-        async function getGoogleAdminKey() {
-            // Do not start duplicate actions while authentication is in progress.
-            if (window.googleAdminAuthBusy) return "";
-            let key = window.googleAdminKey || "";
-            try { key = key || sessionStorage.getItem("chuyen_tau_google_admin_key") || ""; }
-            catch (error) { console.warn("Không thể đọc phiên quản trị."); }
-            if (key && window.googleAdminVerifiedKey === key) return key;
-            window.googleAdminAuthBusy = true;
-            try {
-                while (true) {
-                    if (!key) key = String(window.prompt("Nhập mã quản trị GVCN để kết nối Google Sheets:") || "").trim();
-                    if (!key) return "";
-                    setAdminAuthStatus("Đang kiểm tra mã quản trị…");
-                    let response = await requestAdminKeyCheck(key, window.googleAdminLegacyCheck ? "connection-check" : "admin-check");
-                    // Compatibility while the teacher deploys the new Code.gs.
-                    if (!response.ok && /Mã tra cứu phải gồm đúng 5 chữ số/i.test(response.message || "")) {
-                        window.googleAdminLegacyCheck = true;
-                        response = await requestAdminKeyCheck(key, "connection-check");
-                    }
-                    setAdminAuthStatus("");
-                    if (response.ok) {
-                        rememberGoogleAdminKey(key);
-                        window.googleAdminVerifiedKey = key;
-                        return key;
-                    }
-                    if (!isInvalidGoogleAdminKeyMessage(response.message)) {
-                        showToast(response.message || "Không thể kiểm tra mã quản trị.", "error");
-                        return "";
-                    }
-                    rememberGoogleAdminKey("");
-                    window.googleAdminVerifiedKey = "";
-                    key = "";
-                    // Show the error, but do not schedule a second retry prompt.
-                    showToast("Mã quản trị không chính xác.", "error");
-                }
-            } catch (error) {
-                showToast(error.message || "Không thể kiểm tra mã quản trị.", "error");
-                return "";
-            } finally {
-                setAdminAuthStatus("");
-                window.googleAdminAuthBusy = false;
-            }
+        async function getGoogleAdminKey(options = {}) {
+            return window.teacherRequestAdminKey(options);
         }
 
         window.checkGoogleSheetConnection = async function() {
@@ -6063,18 +6012,25 @@ window.openEditGroupModal = function(id) {
         };
 
         window.syncClassFromGoogle = async function(options = {}) {
-            const adminKey = await getGoogleAdminKey();
+            const adminKey = await getGoogleAdminKey(options);
             if (!adminKey) return;
 
             showToast("Đang đồng bộ danh sách học sinh...", "success");
             const callbackName = "googleClassCallback_" + Date.now();
             const script = document.createElement("script");
-            const timeout = setTimeout(() => finish({ ok: false, message: "Không thể kết nối nguồn dữ liệu." }), 15000);
+            let finished = false;
+            const timeout = setTimeout(() => finish({ ok: false, message: "Không thể kết nối nguồn dữ liệu." }), 45000);
 
-            function cleanup() { clearTimeout(timeout); delete window[callbackName]; script.remove(); }
+            function cleanup() { clearTimeout(timeout); window[callbackName] = () => {}; setTimeout(() => delete window[callbackName], 60000); script.remove(); }
             function finish(response) {
+                if (finished) return;
+                finished = true;
                 cleanup();
                 if (!response || !response.ok || !Array.isArray(response.students)) {
+                    if (response && isInvalidGoogleAdminKeyMessage(response.message)) {
+                        rememberGoogleAdminKey("");
+                        window.googleAdminVerifiedKey = "";
+                    }
                     return showToast((response && response.message) || "Không thể đồng bộ danh sách.", "error");
                 }
                 state.students = response.students.map(mergeStudentFromGoogle);
@@ -8234,7 +8190,7 @@ window.playBellSound = function(idx = 0) {
                                         <div class="flex items-center gap-2 mb-4">
                                             <span class="bg-white/20 backdrop-blur-md px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest border border-white/30 flex items-center gap-1.5"><i class="ph-fill ph-stars text-yellow-300"></i> Không Gian Học Tập</span>
                                         </div>
-                                        <h1 class="text-6xl font-black tracking-tight mb-4 drop-shadow-lg">${state.admin.className || 'LỚP 12A1'}</h1>
+                                        <h1 class="text-6xl font-black tracking-tight mb-4 drop-shadow-lg">${state.admin.className || 'LỚP 12A5'}</h1>
                                         <p class="text-indigo-100 font-medium text-base max-w-2xl leading-relaxed drop-shadow-md">Nơi gieo mầm tri thức và lưu giữ những kỷ niệm thanh xuân rực rỡ nhất của tuổi học trò.</p>
                                     </div>
                                 </div>
@@ -8342,33 +8298,8 @@ window.playBellSound = function(idx = 0) {
                 showToast("Đã thay đổi ảnh bìa ngoài màn hình đăng nhập!", "success");
             }, 1200, 0.8);
         };
-        window.handleLogin = function() {
-            if (!state.auth) state.auth = { loggedIn: false, role: 'gvcn' };
-            const currentRole = state.auth.role;
-            
-            // 1. Nếu là GVCN đăng nhập
-            if (currentRole === 'gvcn') {
-                const email = document.getElementById('login-email').value.trim();
-                const pass = document.getElementById('login-password').value.trim();
-                
-                // CÔ THAY ĐỔI TÀI KHOẢN VÀ MẬT KHẨU Ở DÒNG DƯỚI NÀY NHÉ:
-                if (email === 'cothuy@hoasen.edu.vn' && pass === 'hoasen123') {
-                    state.auth.loggedIn = true;
-                    state.currentTab = 'tong-quan'; // Đăng nhập xong tự nhảy vào Tổng quan
-                    renderLayout();
-                    showToast("Đăng nhập thành công với quyền GVCN!", "success");
-                } else {
-                    showToast("Sai Email hoặc Mật khẩu. Vui lòng thử lại!", "error");
-                }
-            } 
-            // 2. Nếu là Ban cán sự đăng nhập
-            else if (currentRole === 'bancansu') {
-                // Ban cán sự bấm nút là vào thẳng (không cần pass)
-                state.auth.loggedIn = true;
-                state.currentTab = 'hoc-sinh'; // Tự động mở tab Học sinh cho BCS
-                renderLayout();
-                showToast("Truy cập thành công với quyền Ban Cán Sự!", "success");
-            }
+        window.handleLogin = async function() {
+            await authenticateClassLogin((state.auth || {}).role || 'gvcn');
         };
 
         window.logout = function() {
@@ -8439,7 +8370,7 @@ window.renderLoginScreen = function() {
 
                                 <div class="absolute inset-0 bg-gradient-to-t from-[#1e1b4b]/90 via-[#1e1b4b]/20 to-transparent flex flex-col justify-end p-6 z-10 pointer-events-none">
                                     <span class="bg-amber-400 text-[#1e1b4b] text-[10px] font-black px-3 py-1.5 rounded-lg w-max mb-3 tracking-widest shadow-sm">KHÔNG GIAN HỌC TẬP</span>
-                                    <h1 class="text-white text-3xl font-black mb-2 shadow-sm">${state.admin.className || 'LỚP 12A1'}</h1>
+                                    <h1 class="text-white text-3xl font-black mb-2 shadow-sm">${state.admin.className || 'LỚP 12A5'}</h1>
                                     <p class="text-blue-50 text-xs font-medium leading-relaxed opacity-90">Nơi gieo mầm tri thức và lưu giữ những kỷ niệm thanh xuân rực rỡ nhất của tuổi học trò.</p>
                                 </div>
                             </div>
@@ -8555,26 +8486,27 @@ window.renderLoginScreen = function() {
         };
 
         // --- XỬ LÝ KIỂM TRA MẬT KHẨU ---
-        window.processLogin = function() {
-            const role = document.getElementById('login-role').value;
-            const pass = document.getElementById('login-password').value;
-            
-            let isValid = false;
-            
-            // Passwords cài đặt sẵn
-            if (role === 'gvcn' && pass === '123456') isValid = true;
-            else if (role === 'bancansu' && pass === '123') isValid = true;
-            else if (role === 'bgh' && pass === '12A1') isValid = true;
-
-            if (isValid) {
+        async function authenticateClassLogin(role) {
+            const input = document.getElementById('login-password');
+            const key = String(input ? input.value : '').trim();
+            if (!key) { showToast("Vui lòng nhập mã quản trị Apps Script.", "error"); return; }
+            try {
+                const result = await requestAdminKeyCheck(key);
+                if (!result || !result.ok) throw new Error(result && (result.message || result.error) || "Mã quản trị không chính xác.");
+                rememberGoogleAdminKey(key);
+                window.googleAdminVerifiedKey = key;
                 state.auth = { loggedIn: true, role: role };
+                state.currentTab = 'tong-quan';
                 saveData();
-                showToast("Đăng nhập hệ thống thành công!", "success");
-                state.currentTab = 'tong-quan'; 
                 renderLayout();
-            } else {
-                showToast("Mật khẩu không chính xác!", "error");
+                showToast("Đăng nhập hệ thống thành công!", "success");
+            } catch (error) {
+                showToast(error.message || "Không thể kiểm tra mã quản trị.", "error");
             }
+        }
+
+        window.processLogin = async function() {
+            await authenticateClassLogin(document.getElementById('login-role').value);
         };
 
         // --- XỬ LÝ TRA CỨU CỦA PHỤ HUYNH ---
