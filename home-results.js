@@ -30,8 +30,17 @@
         const end = shift(today, -((today.getDay() + 6) % 7));
         return {end, start:shift(end,-7), prior:shift(end,-14), four:shift(end,-28), oldFour:shift(end,-35)};
     }
-    function priorityKey() { return (state.academicYear || '2026 - 2027') + ':' + (state.homeSemester || 'HK1'); }
-    function priorities() { return ((state.settings || {}).prioritySubjects || {})[priorityKey()] || []; }
+    const combinations = { A00:['TOAN','LY','HOA'], A01:['TOAN','LY','ANH'], B00:['TOAN','HOA','SINH'], D01:['TOAN','VAN','ANH'], D07:['TOAN','HOA','ANH'], D08:['TOAN','SINH','ANH'] };
+    function priorityKey(data = state) { return (data.academicYear || '2026 - 2027') + ':' + (data.homeSemester || 'HK1'); }
+    function studentKey(student) { return String(student.studentCode || student.id).trim(); }
+    function priorities(student, data = state) {
+        const personal = (((data.settings || {}).studentPrioritySubjects || {})[priorityKey(data)] || {});
+        const key = studentKey(student);
+        const selected = Object.prototype.hasOwnProperty.call(personal,key)
+            ? personal[key] : combinations[String(student.khoiThi || '').trim().toUpperCase()] || [];
+        const valid = Array.isArray(selected) ? [...new Set(selected)].filter(code=>subjects[code]) : [];
+        return valid.length === 3 ? valid : [];
+    }
     function savedScores(student, data = state) {
         const code = String(student.studentCode || student.id).trim();
         const book = data.scoreBook || {};
@@ -46,9 +55,11 @@
         return rows.map(s => ({...s, value:Number(String(s.score).replace(',', '.')), day:date(s.date)}))
             .filter(s => String(s.score ?? '').trim() !== '' && Number.isFinite(s.value) && s.value >= 0 && s.value <= 10);
     }
-    function model(data, selected, now = new Date()) {
-        const p = periods(now), result = {p, conduct:[], conductProgress:[], academic:[], academicProgress:[], undated:0};
+    function model(data, now = new Date()) {
+        const p = periods(now), result = {p, conduct:[], conductProgress:[], academic:[], academicProgress:[], undated:0, unconfigured:[]};
         (data.students || []).forEach(student => {
+            const selected = priorities(student,data);
+            if (!selected.length) result.unconfigured.push(student);
             const history = (student.history || []).filter(h => !/\[Học tập\]|đổi quà/i.test(h.reason || ''));
             const dated = history.map(h => ({...h, day:date(h.date)}));
             result.undated += dated.filter(h => !h.day).length;
@@ -97,21 +108,42 @@
         return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 shadow-sm"><div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-xl font-black text-slate-800">${icon} ${title}</h2>${action}</div><p class="text-sm text-slate-500 mt-2 mb-6">${note}</p><div class="grid md:grid-cols-2 gap-6"><div><h3 class="font-bold text-slate-700 mb-4">Hiện trạng <span class="text-xs bg-slate-100 rounded-full px-2 py-1">${current.length} học sinh</span></h3><div class="space-y-3">${cards(current,empty)}</div></div><div><h3 class="font-bold text-emerald-700 mb-4">🌱 Tiến bộ <span class="text-xs bg-emerald-50 rounded-full px-2 py-1">${progress.length} học sinh</span></h3><div class="space-y-3">${cards(progress,'Chưa có ghi nhận tiến bộ trong tuần vừa qua.')}</div></div></div></section>`;
     }
     window.renderViewTongQuan = function () {
-        const selected = priorities(), r = model(state,selected), fmt = d => d.toLocaleDateString('vi-VN');
+        const r = model(state), configured = (state.students || []).length - r.unconfigured.length, fmt = d => d.toLocaleDateString('vi-VN');
         return `<div class="max-w-7xl mx-auto space-y-6 pb-12 animate-fade-in"><header class="rounded-3xl bg-white border border-slate-200 p-5 md:p-7"><div class="flex flex-wrap justify-between items-center gap-4"><div><h1 class="text-2xl font-black text-slate-800">Tổng quan kết quả của lớp</h1><p class="text-sm text-slate-500 mt-2">Tuần vừa qua: ${fmt(r.p.start)} – ${fmt(shift(r.p.end,-1))}</p></div><div class="flex gap-2 flex-wrap"><select aria-label="Năm học" onchange="state.academicYear=this.value;saveData();renderLayout()" class="p-3 rounded-xl border font-bold">${['2025 - 2026','2026 - 2027','2027 - 2028'].map(y=>`<option ${y===(state.academicYear||'2026 - 2027')?'selected':''}>${y}</option>`).join('')}</select><select aria-label="Học kỳ thiết lập môn ưu tiên" onchange="state.homeSemester=this.value;saveData();renderLayout()" class="p-3 rounded-xl border font-bold"><option value="HK1" ${state.homeSemester!=='HK2'?'selected':''}>Học kỳ I</option><option value="HK2" ${state.homeSemester==='HK2'?'selected':''}>Học kỳ II</option></select></div></div></header>
         ${section('Kết quả rèn luyện','🧭',r.conduct,r.conductProgress,'Lịch sử lỗi và ghi nhận của giáo viên trong tuần vừa qua. Màu theo số lần mắc lỗi: 1 lần nhắc nhở, 2 lần cảnh báo, từ 3 lần báo động.','Chưa ghi nhận lỗi rèn luyện trong tuần vừa qua.')}
-        <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3"><div><strong class="text-indigo-900">Môn ưu tiên · ${esc(state.homeSemester||'HK1')}</strong><p class="text-sm text-indigo-700 mt-1">${selected.length?selected.map(c=>esc(subjects[c]||c)).join(' · '):'Chưa chọn môn ưu tiên'}</p></div><button onclick="openHomePriorities()" class="px-4 py-3 rounded-xl bg-indigo-600 text-white font-bold">Chọn môn ưu tiên</button></div>
-        ${section('Kết quả học tập','📚',r.academic,r.academicProgress,`Cảnh báo theo từng môn trong 4 tuần: ${fmt(r.p.four)} – ${fmt(shift(r.p.end,-1))}. 1 bài ≤ 5: Nhắc nhở · 2 bài: Cảnh báo · từ 3 bài: Báo động. Tiến bộ xét thay đổi của tuần vừa qua.`,selected.length?'Chưa có cảnh báo từ điểm đã lưu trong khoảng xét.':'Chọn môn ưu tiên để bắt đầu theo dõi học tập.')}
+        <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3"><div><strong class="text-indigo-900">3 môn ưu tiên riêng của từng học sinh · ${esc(state.homeSemester||'HK1')}</strong><p class="text-sm text-indigo-700 mt-1">${configured}/${(state.students||[]).length} học sinh đã có tổ hợp. Cảnh báo và tiến bộ chỉ xét môn ưu tiên của chính học sinh đó.</p></div><button onclick="openHomePriorities()" class="px-4 py-3 rounded-xl bg-indigo-600 text-white font-bold">Chọn môn theo học sinh</button></div>
+        ${r.unconfigured.length?`<div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><strong>${r.unconfigured.length} học sinh chưa có tổ hợp 3 môn:</strong> ${r.unconfigured.map(s=>esc(s.name)).join(', ')}. Chưa tính cảnh báo và tiến bộ học tập cho các em này.</div>`:''}
+        ${section('Kết quả học tập','📚',r.academic,r.academicProgress,`Cảnh báo theo từng môn ưu tiên riêng trong 4 tuần: ${fmt(r.p.four)} – ${fmt(shift(r.p.end,-1))}. 1 bài ≤ 5: Nhắc nhở · 2 bài: Cảnh báo · từ 3 bài: Báo động. Tiến bộ xét thay đổi của tuần vừa qua.`,configured?'Chưa có cảnh báo từ điểm đã lưu trong khoảng xét.':'Chọn 3 môn ưu tiên cho từng học sinh để bắt đầu theo dõi học tập.')}
         ${r.undated?`<p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-4">Có ${r.undated} bản ghi thiếu ngày hợp lệ, chưa được tính vào báo cáo tuần. Hãy bổ sung ngày trong dữ liệu nguồn.</p>`:''}<p class="text-xs text-slate-500">Bấm vào học sinh để xem hồ sơ tra cứu PHHS. Báo cáo dùng dữ liệu đã lưu trên máy; có thể tải điểm mới nhất trong Kết quả học tập.</p></div>`;
     };
     window.openHomePriorities = function () {
-        const selected = priorities();
-        document.getElementById('modal-container').innerHTML = `<div id="home-priorities-modal" class="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-4"><div role="dialog" aria-modal="true" aria-labelledby="home-priorities-title" class="bg-white rounded-3xl p-6 w-full max-w-lg"><h2 id="home-priorities-title" class="text-xl font-black">Môn ưu tiên chung cho lớp</h2><p class="text-sm text-slate-500 mt-2">${esc(state.academicYear||'2026 - 2027')} · ${esc(state.homeSemester||'HK1')}. Áp dụng cho cảnh báo và tiến bộ học tập.</p><div class="grid grid-cols-2 gap-3 my-6">${Object.entries(subjects).map(([code,name])=>`<label class="p-4 rounded-xl border flex gap-3 items-center cursor-pointer"><input type="checkbox" name="home-priority" value="${code}" ${selected.includes(code)?'checked':''}>${name}</label>`).join('')}</div><div class="flex justify-end gap-3"><button onclick="closeModal('home-priorities-modal')" class="px-4 py-3 rounded-xl border">Hủy</button><button onclick="saveHomePriorities()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold">Lưu lựa chọn</button></div></div></div>`;
+        const rows = (state.students || []).map(student => {
+            const selected = priorities(student);
+            return `<fieldset data-priority-student="${esc(studentKey(student))}" class="border rounded-2xl p-4 min-w-0"><legend class="font-bold px-2">${esc(student.name)} · ${esc(student.studentCode || '')}</legend><p class="text-xs text-slate-500 mb-3">Khối thi: ${esc(student.khoiThi || 'Chưa có')} · <span data-priority-count>${selected.length}/3 môn</span></p><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${Object.entries(subjects).map(([code,name])=>`<label class="p-2 rounded-lg border flex gap-2 items-center cursor-pointer text-sm"><input type="checkbox" value="${code}" onchange="updateHomePriorityCount(this)" ${selected.includes(code)?'checked':''}>${name}</label>`).join('')}</div></fieldset>`;
+        }).join('');
+        document.getElementById('modal-container').innerHTML = `<div id="home-priorities-modal" class="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-3 sm:p-4"><div role="dialog" aria-modal="true" aria-labelledby="home-priorities-title" class="bg-white rounded-3xl p-5 sm:p-6 w-full max-w-3xl max-h-[90dvh] flex flex-col"><h2 id="home-priorities-title" class="text-xl font-black">3 môn ưu tiên của từng học sinh</h2><p class="text-sm text-slate-500 mt-2 mb-4">${esc(state.academicYear||'2026 - 2027')} · ${esc(state.homeSemester||'HK1')}. Tự lấy tổ hợp từ khối thi đã nhập khi nhận diện được; bạn có thể chỉnh riêng từng em. Chọn đúng 3 môn, hoặc bỏ trống nếu chưa thiết lập. Lựa chọn được lưu trên thiết bị này.</p><div class="space-y-4 overflow-y-auto min-h-0 pr-1">${rows || '<p class="text-slate-500 py-5">Chưa có học sinh. Hãy tải danh sách lớp trước.</p>'}</div><p id="home-priority-error" role="status" class="text-sm text-red-700 mt-3"></p><div class="flex justify-end gap-3 pt-4"><button onclick="closeModal('home-priorities-modal')" class="px-4 py-3 rounded-xl border">Hủy</button><button onclick="saveHomePriorities()" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold">Lưu lựa chọn</button></div></div></div>`;
+    };
+    window.updateHomePriorityCount = function (input) {
+        const row = input.closest('[data-priority-student]');
+        row.dataset.changed = 'true';
+        const count = row.querySelectorAll('input:checked').length;
+        row.querySelector('[data-priority-count]').textContent = `${count}/3 môn${count && count !== 3 ? ' — cần chọn đúng 3 môn' : ''}`;
     };
     window.saveHomePriorities = function () {
+        const changes = {};
+        const rows = Array.from(document.querySelectorAll('[data-priority-student]'));
+        for (const row of rows) {
+            const selected = Array.from(row.querySelectorAll('input:checked'),x=>x.value);
+            if (selected.length && selected.length !== 3) {
+                document.getElementById('home-priority-error').textContent = `${row.querySelector('legend').textContent}: hãy chọn đúng 3 môn (đang chọn ${selected.length}).`;
+                row.scrollIntoView({block:'nearest'});
+                return;
+            }
+            if (row.dataset.changed === 'true') changes[row.dataset.priorityStudent] = selected;
+        }
         state.settings = state.settings || {};
-        state.settings.prioritySubjects = state.settings.prioritySubjects || {};
-        state.settings.prioritySubjects[priorityKey()] = Array.from(document.querySelectorAll('[name="home-priority"]:checked'),x=>x.value);
+        state.settings.studentPrioritySubjects = state.settings.studentPrioritySubjects || {};
+        state.settings.studentPrioritySubjects[priorityKey()] = {...(state.settings.studentPrioritySubjects[priorityKey()] || {}), ...changes};
         saveData(); closeModal('home-priorities-modal'); renderLayout();
     };
     const parentRenderer = showParentView;
@@ -125,6 +157,7 @@
         try { state.scores = [...(original||[]).filter(s=>String(s.studentCode).trim()!==code),...scores]; parentRenderer(id); }
         finally { state.scores = original; }
         const main = document.querySelector('#parent-view-modal main');
+        if(main) main.insertAdjacentHTML('afterbegin',`<div class="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900"><strong>3 môn ưu tiên:</strong> ${priorities(student).map(code=>esc(subjects[code])).join(' · ') || 'Chưa thiết lập'}</div>`);
         if(main) main.insertAdjacentHTML('beforeend',`<section class="bg-white rounded-3xl border p-5"><h3 class="font-black text-xl mb-4">Kết quả rèn luyện</h3>${(student.history||[]).length?(student.history||[]).slice().reverse().map(h=>`<div class="py-3 border-b"><strong>${esc(h.reason)}</strong><p class="text-sm text-slate-500">${esc(h.date)} · ${esc(h.points)} điểm</p></div>`).join(''):'Chưa có ghi nhận.'}</section>`);
     };
     window.openHomeStudent = function (id) { showParentView(id); };

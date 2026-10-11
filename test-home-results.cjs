@@ -8,7 +8,8 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(__dirname+'/home-results.js','utf8'),context);
 const now = new Date('2026-10-09T10:00:00Z'); // Report 28 Sep – 4 Oct; 4 weeks 7 Sep – 4 Oct.
 function run(scores, history=[], selected=['TOAN']) {
-  return context.window.homeResultsModel({students:[{id:1,studentCode:'001',name:'An',history}],scores,scoreBook:{}},selected,now);
+  const personal = selected.length ? [...new Set([...selected,'LY','HOA','SINH'])].slice(0,3) : [];
+  return context.window.homeResultsModel({students:[{id:1,studentCode:'001',name:'An',history}],scores,scoreBook:{},settings:{studentPrioritySubjects:{'2026 - 2027:HK1':{'001':personal}}}},now);
 }
 const score=(date,value,subject='Toán')=>({studentCode:'001',date,score:value,subject,title:'Bài kiểm tra'});
 assert.equal(run([score('2026-10-01',5)]).academic[0].level,1);
@@ -27,8 +28,9 @@ const conduct=run([], [{date:'2026-09-22',points:-1,reason:'Đi muộn [Nề n�
 assert.equal(conduct.conduct[0].details.length,1);
 assert.equal(conduct.conductProgress[0].details.length,2);
 const book={students:[{id:1,studentCode:'001'}], scores:[score('2026-10-01',1)],scoreBook:{tests:[{code:'T1',subjectCode:'TOAN',date:'2026-10-01'}],students:[{studentCode:'001',scores:{T1:{score:9}}}]}};
-assert.equal(context.window.homeResultsModel(book,['TOAN'],now).academic.length,0);
-context.state={...book,settings:{prioritySubjects:{'2026 - 2027:HK1':['TOAN']}},academicYear:'2026 - 2027'};
+book.students[0].khoiThi='A00';
+assert.equal(context.window.homeResultsModel(book,now).academic.length,0);
+context.state={...book,settings:{studentPrioritySubjects:{'2026 - 2027:HK1':{'001':['TOAN','LY','HOA']}}},academicYear:'2026 - 2027'};
 const originalScores=context.state.scores;
 context.openHomeStudent(1);
 assert.equal(profileScores[0].score,9);
@@ -36,7 +38,21 @@ assert.equal(context.state.scores,originalScores);
 assert.equal(profileConduct.includes('Kết quả rèn luyện'),true);
 context.showParentView(1); // Re-rendering a profile after subject selection keeps saved scores.
 assert.equal(profileScores[0].score,9);
-assert.equal(context.renderViewTongQuan().includes('Chọn môn ưu tiên'),true);
+assert.equal(context.renderViewTongQuan().includes('Chọn môn theo học sinh'),true);
+const individual={students:[{id:1,studentCode:'001',name:'An',khoiThi:'A00'},{id:2,studentCode:'002',name:'Bình',khoiThi:'D01'},{id:3,studentCode:'003',name:'Châu'}],scores:[score('2026-10-01',4,'Hoá'),{...score('2026-10-01',4,'Hoá'),studentCode:'002'}]};
+const personalReport=context.homeResultsModel(individual,now);
+assert.equal(personalReport.academic.length,1);
+assert.equal(personalReport.academic[0].student.name,'An');
+assert.equal(personalReport.unconfigured[0].name,'Châu');
+individual.settings={prioritySubjects:{'2026 - 2027:HK1':['TOAN','LY','HOA']},studentPrioritySubjects:{'2026 - 2027:HK1':{'001':['TOAN','VAN','ANH'],'002':['TOAN','LY','HOA']}}};
+const overrideReport=context.homeResultsModel(individual,now);
+assert.equal(overrideReport.academic.length,1);
+assert.equal(overrideReport.academic[0].student.name,'Bình');
+assert.equal(overrideReport.unconfigured[0].name,'Châu'); // Class-wide settings are ignored.
+individual.homeSemester='HK2';
+assert.equal(context.homeResultsModel(individual,now).academic[0].student.name,'An');
+individual.settings.studentPrioritySubjects['2026 - 2027:HK2']={'001':['TOAN','LY']};
+assert.equal(context.homeResultsModel(individual,now).unconfigured.length,2);
 const html=fs.readFileSync(__dirname+'/index.html','utf8');
 for(const script of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) new vm.Script(script[1]);
 console.log('Passed: warning thresholds, subject isolation, date boundaries, invalid/blank scores, progress, conduct and score-book authority; inline scripts parse.');
