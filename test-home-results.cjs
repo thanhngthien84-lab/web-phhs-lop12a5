@@ -17,7 +17,9 @@ assert.equal(run([score('2026-09-20',4),score('2026-10-01',5)]).academic[0].leve
 assert.equal(run([score('2026-09-20',4),score('2026-09-25',5),score('2026-10-01',3)]).academic[0].level,3);
 assert.equal(run([score('2026-09-20',4),score('2026-09-25',5),score('2026-10-01',3,'Anh')],[],['TOAN','ANH']).academic[0].level,2);
 assert.equal(run([score('2026-09-06',4),score('2026-10-05',2),score('',1),score('2026-10-01','')]).academic.length,0);
-assert.equal(run([score('2026-10-01',1)],[],[]).academic.length,0);
+assert.equal(run([score('2026-10-01',1)],[],[]).academic.length,1); // Math is always monitored.
+assert.equal(run([score('2026-10-01',1,'Văn')],[],[]).academic.length,1);
+assert.equal(run([score('2026-10-01',1,'Hoá')],[],[]).academic.length,0);
 assert.equal(run([score('2026-08-31',4)]).academicProgress[0].details[0].includes('thoát'),true);
 assert.equal(run([score('2026-09-20',8),score('2026-09-25',9),score('2026-10-01',10)]).academicProgress[0].details.some(x=>x.includes('duy trì')),true);
 assert.equal(run([score('2026-09-20',5),score('2026-10-01',7)]).academicProgress[0].details.some(x=>x.includes('5 → 7')),true);
@@ -43,16 +45,25 @@ const individual={students:[{id:1,studentCode:'001',name:'An',khoiThi:'A00'},{id
 const personalReport=context.homeResultsModel(individual,now);
 assert.equal(personalReport.academic.length,1);
 assert.equal(personalReport.academic[0].student.name,'An');
-assert.equal(personalReport.unconfigured[0].name,'Châu');
+assert.equal(personalReport.unconfigured.length,2); // D01 needs a fourth subject; no block needs both optional subjects.
+assert.equal(personalReport.unconfigured[0].name,'Bình');
 individual.settings={prioritySubjects:{'2026 - 2027:HK1':['TOAN','LY','HOA']},studentPrioritySubjects:{'2026 - 2027:HK1':{'001':['TOAN','VAN','ANH'],'002':['TOAN','LY','HOA']}}};
 const overrideReport=context.homeResultsModel(individual,now);
 assert.equal(overrideReport.academic.length,1);
 assert.equal(overrideReport.academic[0].student.name,'Bình');
-assert.equal(overrideReport.unconfigured[0].name,'Châu'); // Class-wide settings are ignored.
+assert.equal(overrideReport.unconfigured.length,2); // A legacy D01 triple remains incomplete; class-wide settings are ignored.
 individual.homeSemester='HK2';
 assert.equal(context.homeResultsModel(individual,now).academic[0].student.name,'An');
 individual.settings.studentPrioritySubjects['2026 - 2027:HK2']={'001':['TOAN','LY']};
-assert.equal(context.homeResultsModel(individual,now).unconfigured.length,2);
+assert.equal(context.homeResultsModel(individual,now).unconfigured.length,3);
+individual.settings.studentPrioritySubjects['2026 - 2027:HK2']={'001':['TOAN','VAN','LY','HOA'],'002':['TOAN','VAN','ANH','SINH']};
+assert.equal(context.homeResultsModel(individual,now).unconfigured.length,1);
+assert.equal(context.homeResultsModel(individual,now).academic[0].student.name,'An');
+const extraOptional={students:[{id:1,studentCode:'001'}],scores:[score('2026-10-01',4,'Hoá'),score('2026-10-01',4,'Văn')],settings:{studentPrioritySubjects:{'2026 - 2027:HK1':{'001':['LY','HOA','ANH']}}}};
+const invalidReport=context.homeResultsModel(extraOptional,now);
+assert.equal(invalidReport.unconfigured.length,1);
+assert.equal(invalidReport.academic[0].details.length,1); // Only mandatory subjects until the oversized old selection is fixed.
+assert.equal(invalidReport.academic[0].details[0].includes('Văn'),true);
 const html=fs.readFileSync(__dirname+'/index.html','utf8');
 for(const script of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) new vm.Script(script[1]);
 console.log('Passed: warning thresholds, subject isolation, date boundaries, invalid/blank scores, progress, conduct and score-book authority; inline scripts parse.');
