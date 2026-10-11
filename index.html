@@ -1312,6 +1312,35 @@ function renderViewScoreEntry() {
     const scoreRowsByCode = {};
     (book.students || []).forEach(function(row) { scoreRowsByCode[String(row.studentCode || "").trim()] = row; });
     const students = [...(state.students || []).filter(student => String(student.studentCode || "").trim())];
+    // Score-entry order requested for the 12A5 marksheet; records remain keyed by studentCode.
+    const scoreEntryOrder = [
+        "Nguyễn Gia An",
+        "Đinh Tuấn Anh",
+        "Nguyễn An Quế Anh",
+        "Phạm Duy Bách",
+        "Nguyễn Hà Khánh Chi",
+        "Nguyễn Hữu Dương",
+        "Ngô Đình Minh Đăng",
+        "Đỗ Minh Đức",
+        "Nguyễn Ngọc Đức",
+        "Phạm Minh Đức",
+        "Tạ Minh Đức",
+        "Lê An Huy",
+        "Phạm Nguyên Khôi",
+        "Trần Trung Kiên",
+        "Phạm Tùng Lâm",
+        "Phạm Bảo Linh",
+        "Vũ Thế Phong",
+        "Đinh Trường Phú",
+        "Nguyễn Phúc Quang",
+        "Lê Khắc Thái",
+        "Nguyễn Hà Trang",
+        "Bùi Hoàng Minh Tùng",
+        "Nguyễn Quang Vũ"
+];
+    const orderNameKey = name => String(name || "").normalize("NFC").trim().replace(/\s+/g, " ").toLocaleLowerCase("vi");
+    const orderRank = new Map(scoreEntryOrder.map((name, index) => [orderNameKey(name), index]));
+    students.sort((a, b) => (orderRank.get(orderNameKey(a.name)) ?? Infinity) - (orderRank.get(orderNameKey(b.name)) ?? Infinity));
     // Only the current class roster determines which students appear here.
     const savedScores = [];
     if (selectedTest && selectedTest.code && selectedTest.code !== "__new__") {
