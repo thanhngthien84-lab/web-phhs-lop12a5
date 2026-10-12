@@ -53,7 +53,7 @@
         const rows = [];
         if (row) (book.tests || []).forEach(test => {
             const entry = (row.scores || {})[test.code];
-            if (entry && String(entry.score ?? '').trim() !== '') rows.push({subject:subjects[test.subjectCode] || test.subjectCode, title:test.title, date:test.date, score:entry.score});
+            if (entry && String(entry.score ?? '').trim() !== '') rows.push({testCode:test.code, testNumber:Number(String(test.code || '').match(/_BAI_(\d+)$/i)?.[1]), subject:subjects[test.subjectCode] || test.subjectCode, title:test.title, date:test.date, score:entry.score, classAverage:test.classAverage, note:entry.note || ''});
         });
         // The score book is authoritative when present; older imports use state.scores.
         if (!row) rows.push(...(data.scores || []).filter(s => String(s.studentCode || '').trim() === code));
