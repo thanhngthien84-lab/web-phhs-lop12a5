@@ -1157,7 +1157,7 @@ async function loadHomework() {
  const key=await getGoogleAdminKey();if(!key)return;
  h.busy=true;renderLayout();
  try{
- const r=await homeworkRequest("homework",{adminKey:key});h.records=r.records||[];h.students=r.students||[];h.loaded=true;prepareHomeworkDraft();rememberGoogleAdminKey(key);
+ const r=await homeworkRequest("homework",{adminKey:key});h.records=r.records||[];h.students=r.students||[];h.loaded=true;prepareHomeworkDraft();if(window.rememberHomeHomework)rememberHomeHomework(h.records);rememberGoogleAdminKey(key);
  }catch(e){showToast(e.message,"error");}
  finally{h.busy=false;if(window.learningSection==="homework")renderLayout();}
 }
@@ -1225,7 +1225,7 @@ async function saveHomeworkUI(){
  }
  if(batch.length)batches.push(batch);
  for(const items of batches){await homeworkRequest("homework-save",{adminKey:key,homework:JSON.stringify({...input,records:items})});saved+=items.length;}
- const fresh=await homeworkRequest("homework",{adminKey:key});h.records=fresh.records;h.students=fresh.students;prepareHomeworkDraft();
+ const fresh=await homeworkRequest("homework",{adminKey:key});h.records=fresh.records;h.students=fresh.students;prepareHomeworkDraft();if(window.rememberHomeHomework)rememberHomeHomework(h.records);
  rememberGoogleAdminKey(key);showToast("Đã lưu BTVN cho "+saved+" học sinh.","success");
  }catch(e){showToast("Đã xác nhận lưu "+saved+"/"+records.length+" học sinh. "+e.message,"error");}
  finally{h.busy=false;renderLayout();}
@@ -8650,7 +8650,7 @@ window.deleteHistoryRecord = function(studentId, historyId) {
             }
         };
     </script>
-<script src="home-results.js?v=class-average-20261012"></script>
+<script src="home-results.js?v=homework-conduct-20261014"></script>
 </body>
 </html>
 
