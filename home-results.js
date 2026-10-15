@@ -28,7 +28,22 @@
         const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
         const today = new Date(Number(p.year), Number(p.month) - 1, Number(p.day));
         const end = shift(today, -((today.getDay() + 6) % 7));
-        return {end, start:shift(end,-7), prior:shift(end,-14), four:shift(end,-28), oldFour:shift(end,-35)};
+        return {today, end, start:shift(end,-7), prior:shift(end,-14), four:shift(end,-28), oldFour:shift(end,-35)};
+    }
+    function conductPeriod(data, p) {
+        const mode = ['current','previous','all'].includes(data.homeConductPeriod) ? data.homeConductPeriod : 'current';
+        if (mode === 'previous') return {mode,start:p.start,end:p.end,prior:p.prior,priorEnd:p.start,label:'Tuần trước'};
+        if (mode === 'all') return {mode,start:new Date(0),end:shift(p.today,1),label:'Toàn bộ lịch sử đến hôm nay'};
+        // Compare the same elapsed weekdays, not a partial week with a full week.
+        return {mode,start:p.end,end:shift(p.today,1),prior:p.start,priorEnd:shift(p.today,-6),label:'Tuần này đến hôm nay'};
+    }
+    window.changeHomeConductPeriod = function (value) {
+        if (!['current','previous','all'].includes(value)) return;
+        state.homeConductPeriod = value; saveData(); renderLayout();
+    };
+    function conductPeriodSelect() {
+        const selected = conductPeriod(state,periods(new Date())).mode;
+        return `<label class="text-sm font-bold text-slate-700">Thời gian rèn luyện <select aria-label="Thời gian rèn luyện" onchange="changeHomeConductPeriod(this.value)" class="ml-2 px-3 py-2 rounded-xl border bg-white">${[['current','Tuần này'],['previous','Tuần trước'],['all','Toàn bộ lịch sử']].map(([value,label])=>`<option value="${value}" ${value===selected?'selected':''}>${label}</option>`).join('')}</select></label>`;
     }
     const combinations = { A00:['TOAN','LY','HOA'], A01:['TOAN','LY','ANH'], B00:['TOAN','HOA','SINH'], D01:['TOAN','VAN','ANH'], D07:['TOAN','HOA','ANH'], D08:['TOAN','SINH','ANH'] };
     function priorityKey(data = state) { return (data.academicYear || '2026 - 2027') + ':' + (data.homeSemester || 'HK1'); }
@@ -108,7 +123,7 @@
         return `<div class="mt-5 border-t pt-5"><h4 class="font-bold mb-3">Lịch sử BTVN — tất cả các môn</h4>${homeworkStatusNotice()}<p class="text-sm font-bold my-3">${esc(summary)}</p>${rows.length ? rows.map(r=>`<div class="py-3 border-b"><strong class="${homeworkFault(r.status)?'text-orange-700':'text-emerald-700'}">${esc(homeworkDescription(r))}</strong>${r.supplementedAt?`<p class="text-sm text-slate-500">Bổ sung lúc: ${esc(r.supplementedAt)}</p>`:''}</div>`).join('') : '<p class="text-sm text-slate-500 mt-3">Chưa có bản ghi BTVN đã tải cho học sinh này.</p>'}</div>`;
     }
     function model(data, now = new Date()) {
-        const p = periods(now), result = {p, conduct:[], conductProgress:[], academic:[], academicProgress:[], undated:0, unconfigured:[]};
+        const p = periods(now), cp = conductPeriod(data,p), result = {p, conductPeriod:cp, conduct:[], conductProgress:[], academic:[], academicProgress:[], undated:0, unconfigured:[]};
         (data.students || []).forEach(student => {
             const selected = priorities(student,data);
             if (prioritySelection(student,data).length !== 4) result.unconfigured.push(student);
@@ -117,17 +132,17 @@
             const history = (student.history || []).filter(h => !/\[Học tập\]|đổi quà/i.test(h.reason || '') && !(h.homeworkKey && homeworkKeys.has(h.homeworkKey)));
             const dated = history.map(h => ({...h, day:date(h.date)}));
             result.undated += dated.filter(h => !h.day).length + homework.filter(h=>!h.day).length;
-            const recent = dated.filter(h => within(h.day,p.start,p.end));
-            const old = dated.filter(h => within(h.day,p.prior,p.start));
+            const recent = dated.filter(h => within(h.day,cp.start,cp.end));
+            const old = cp.mode === 'all' ? [] : dated.filter(h => within(h.day,cp.prior,cp.priorEnd));
             const faults = recent.filter(h => Number(h.points) < 0), oldFaults = old.filter(h => Number(h.points) < 0);
-            const homeworkRecent = homework.filter(h=>within(h.day,p.start,p.end));
+            const homeworkRecent = homework.filter(h=>within(h.day,cp.start,cp.end));
             const homeworkFaults = homeworkRecent.filter(h=>h.fault);
-            const oldHomeworkFaults = homework.filter(h=>within(h.day,p.prior,p.start) && h.fault);
+            const oldHomeworkFaults = cp.mode === 'all' ? [] : homework.filter(h=>within(h.day,cp.prior,cp.priorEnd) && h.fault);
             const count = faults.length + homeworkFaults.length, oldCount = oldFaults.length + oldHomeworkFaults.length;
             if (count) result.conduct.push({student, level:Math.min(3,count), details:[...faults.map(h=>h.reason || 'Lỗi rèn luyện'),...homeworkFaults.map(homeworkDescription)]});
             const improvements = recent.filter(h => Number(h.points) > 0).map(h => h.reason || 'Được giáo viên ghi nhận tiến bộ');
-            homework.filter(h=>h.status==='supplemented' && within(date(h.supplementedAt),p.start,p.end)).forEach(h=>improvements.push(`Đã khắc phục — ${homeworkDescription(h)}`));
-            homework.filter(h=>h.status==='done' && homeworkFault(h.initialStatus) && within(date(h.updatedAt),p.start,p.end)).forEach(h=>improvements.push(`Đã hoàn thành sau ghi nhận thiếu bài — ${homeworkDescription(h)}`));
+            homework.filter(h=>h.status==='supplemented' && within(date(h.supplementedAt),cp.start,cp.end)).forEach(h=>improvements.push(`Đã khắc phục — ${homeworkDescription(h)}`));
+            homework.filter(h=>h.status==='done' && homeworkFault(h.initialStatus) && within(date(h.updatedAt),cp.start,cp.end)).forEach(h=>improvements.push(`Đã hoàn thành sau ghi nhận thiếu bài — ${homeworkDescription(h)}`));
             if (oldCount > count) improvements.push(`Giảm số lần ghi nhận lỗi: ${oldCount} → ${count}`);
             if (improvements.length) result.conductProgress.push({student,level:0,details:improvements});
             const all = savedScores(student, data);
@@ -161,16 +176,16 @@
         if (!rows.length) return `<p class="p-6 text-sm text-slate-500 text-center border border-dashed border-slate-200 rounded-2xl">${esc(empty)}</p>`;
         return rows.map(row => `<button type="button" onclick="openHomeStudent(${toInlineJsValue(row.student.id)})" class="w-full text-left p-4 rounded-2xl border ${colors[row.level]} hover:shadow-md focus:ring-2 focus:ring-indigo-400 transition-all"><span class="flex items-center justify-between gap-3"><strong>${esc(row.student.name)}</strong><span class="text-xs font-bold">${row.level ? levelNames[row.level] : 'Tiến bộ'} ↗</span></span><span class="block text-xs opacity-70 mt-1">${esc(row.student.group || 'Chưa phân tổ')}</span><span class="block mt-3 text-sm leading-6">${[...new Set(row.details)].map(esc).join('<br>')}</span></button>`).join('');
     }
-    function section(title, icon, current, progress, note, empty) {
+    function section(title, icon, current, progress, note, empty, progressEmpty='Chưa có ghi nhận tiến bộ trong tuần vừa qua.') {
         const action = title === 'Kết quả rèn luyện'
             ? `<button onclick="switchTab('tich-diem')" class="text-sm font-bold text-indigo-700 px-3 py-2 bg-indigo-50 rounded-xl">Nhập ghi nhận rèn luyện</button>`
             : `<button onclick="switchTab('diem-hoc-tap')" class="text-sm font-bold text-indigo-700 px-3 py-2 bg-indigo-50 rounded-xl">Nhập / tải điểm</button>`;
-        return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 shadow-sm"><div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-xl font-black text-slate-800">${icon} ${title}</h2>${action}</div><p class="text-sm text-slate-500 mt-2 mb-6">${note}</p><div class="grid md:grid-cols-2 gap-6"><div><h3 class="font-bold text-slate-700 mb-4">Hiện trạng <span class="text-xs bg-slate-100 rounded-full px-2 py-1">${current.length} học sinh</span></h3><div class="space-y-3">${cards(current,empty)}</div></div><div><h3 class="font-bold text-emerald-700 mb-4">🌱 Tiến bộ <span class="text-xs bg-emerald-50 rounded-full px-2 py-1">${progress.length} học sinh</span></h3><div class="space-y-3">${cards(progress,'Chưa có ghi nhận tiến bộ trong tuần vừa qua.')}</div></div></div></section>`;
+        return `<section class="bg-white rounded-3xl border border-slate-200 p-5 md:p-7 shadow-sm"><div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-xl font-black text-slate-800">${icon} ${title}</h2><div class="flex flex-wrap items-center gap-3">${title === 'Kết quả rèn luyện' ? conductPeriodSelect() : ''}${action}</div></div><p class="text-sm text-slate-500 mt-2 mb-6">${note}</p><div class="grid md:grid-cols-2 gap-6"><div><h3 class="font-bold text-slate-700 mb-4">Hiện trạng <span class="text-xs bg-slate-100 rounded-full px-2 py-1">${current.length} học sinh</span></h3><div class="space-y-3">${cards(current,empty)}</div></div><div><h3 class="font-bold text-emerald-700 mb-4">🌱 Tiến bộ <span class="text-xs bg-emerald-50 rounded-full px-2 py-1">${progress.length} học sinh</span></h3><div class="space-y-3">${cards(progress,progressEmpty)}</div></div></div></section>`;
     }
     window.renderViewTongQuan = function () {
         const r = model(state), configured = (state.students || []).length - r.unconfigured.length, fmt = d => d.toLocaleDateString('vi-VN');
-        return `<div class="max-w-7xl mx-auto space-y-6 pb-12 animate-fade-in"><header class="rounded-3xl bg-white border border-slate-200 p-5 md:p-7"><div class="flex flex-wrap justify-between items-center gap-4"><div><h1 class="text-2xl font-black text-slate-800">Tổng quan kết quả của lớp</h1><p class="text-sm text-slate-500 mt-2">Tuần vừa qua: ${fmt(r.p.start)} – ${fmt(shift(r.p.end,-1))}</p></div><div class="flex gap-2 flex-wrap"><select aria-label="Năm học" onchange="state.academicYear=this.value;saveData();renderLayout()" class="p-3 rounded-xl border font-bold">${['2025 - 2026','2026 - 2027','2027 - 2028'].map(y=>`<option ${y===(state.academicYear||'2026 - 2027')?'selected':''}>${y}</option>`).join('')}</select><select aria-label="Học kỳ thiết lập môn ưu tiên" onchange="state.homeSemester=this.value;saveData();renderLayout()" class="p-3 rounded-xl border font-bold"><option value="HK1" ${state.homeSemester!=='HK2'?'selected':''}>Học kỳ I</option><option value="HK2" ${state.homeSemester==='HK2'?'selected':''}>Học kỳ II</option></select></div></div></header>
-        ${homeworkStatusNotice()}${section('Kết quả rèn luyện','🧭',r.conduct,r.conductProgress,'Ghi nhận giáo viên và BTVN tất cả các môn trong tuần vừa qua. Mỗi bài chưa làm/làm chưa đủ tính 1 lần; đã bổ sung vẫn giữ lỗi ban đầu và ghi nhận khắc phục theo ngày bổ sung. 1 lần nhắc nhở, 2 lần cảnh báo, từ 3 lần báo động.','Chưa ghi nhận lỗi rèn luyện trong tuần vừa qua.')}
+        return `<div class="max-w-7xl mx-auto space-y-6 pb-12 animate-fade-in"><header class="rounded-3xl bg-white border border-slate-200 p-5 md:p-7"><div class="flex flex-wrap justify-between items-center gap-4"><div><h1 class="text-2xl font-black text-slate-800">Tổng quan kết quả của lớp</h1><p class="text-sm text-slate-500 mt-2">Kỳ báo cáo học tập — tuần trước: ${fmt(r.p.start)} – ${fmt(shift(r.p.end,-1))}</p></div><div class="flex gap-2 flex-wrap"><select aria-label="Năm học" onchange="state.academicYear=this.value;saveData();renderLayout()" class="p-3 rounded-xl border font-bold">${['2025 - 2026','2026 - 2027','2027 - 2028'].map(y=>`<option ${y===(state.academicYear||'2026 - 2027')?'selected':''}>${y}</option>`).join('')}</select><select aria-label="Học kỳ thiết lập môn ưu tiên" onchange="state.homeSemester=this.value;saveData();renderLayout()" class="p-3 rounded-xl border font-bold"><option value="HK1" ${state.homeSemester!=='HK2'?'selected':''}>Học kỳ I</option><option value="HK2" ${state.homeSemester==='HK2'?'selected':''}>Học kỳ II</option></select></div></div></header>
+        ${homeworkStatusNotice()}${section('Kết quả rèn luyện','🧭',r.conduct,r.conductProgress,`${r.conductPeriod.label}${r.conductPeriod.mode==='all' ? '' : ': '+fmt(r.conductPeriod.start)+' – '+fmt(shift(r.conductPeriod.end,-1))}. Ghi nhận giáo viên và BTVN tất cả các môn. Mỗi bài chưa làm/làm chưa đủ tính 1 lần; đã bổ sung vẫn giữ lỗi ban đầu và ghi nhận khắc phục theo ngày bổ sung. 1 lần nhắc nhở, 2 lần cảnh báo, từ 3 lần báo động.`, 'Chưa ghi nhận lỗi rèn luyện trong khoảng thời gian đã chọn.', 'Chưa có ghi nhận tiến bộ trong khoảng thời gian đã chọn.')}
         <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3"><div><strong class="text-indigo-900">4 môn theo dõi của từng học sinh · ${esc(state.homeSemester||'HK1')}</strong><p class="text-sm text-indigo-700 mt-1">Toán, Văn bắt buộc + 2 môn chọn riêng. ${configured}/${(state.students||[]).length} học sinh đã đủ 4 môn.</p></div><button onclick="openHomePriorities()" class="px-4 py-3 rounded-xl bg-indigo-600 text-white font-bold">Chọn môn theo học sinh</button></div>
         ${r.unconfigured.length?`<div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><strong>${r.unconfigured.length} học sinh cần bổ sung lựa chọn để đủ 4 môn:</strong> ${r.unconfigured.map(s=>esc(s.name)).join(', ')}. Toán và Văn vẫn luôn được theo dõi.</div>`:''}
         ${section('Kết quả học tập','📚',r.academic,r.academicProgress,`Theo dõi Toán, Văn và 2 môn chọn riêng. Cảnh báo theo từng môn trong 4 tuần: ${fmt(r.p.four)} – ${fmt(shift(r.p.end,-1))}. 1 bài ≤ 5: Nhắc nhở · 2 bài: Cảnh báo · từ 3 bài: Báo động. Tiến bộ xét thay đổi của tuần vừa qua.`,'Chưa có cảnh báo từ điểm đã lưu trong khoảng xét.')}
