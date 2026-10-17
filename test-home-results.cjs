@@ -9,7 +9,7 @@ vm.runInContext(fs.readFileSync(__dirname+'/home-results.js','utf8'),context);
 const now = new Date('2026-10-09T10:00:00Z'); // Report 28 Sep – 4 Oct; 4 weeks 7 Sep – 4 Oct.
 function run(scores, history=[], selected=['TOAN']) {
   const personal = selected.length ? [...new Set([...selected,'LY','HOA','SINH'])].slice(0,3) : [];
-  return context.window.homeResultsModel({students:[{id:1,studentCode:'001',name:'An',history}],scores,scoreBook:{},settings:{studentPrioritySubjects:{'2026 - 2027:HK1':{'001':personal}}}},now);
+  return context.window.homeResultsModel({homeConductPeriod:'previous',students:[{id:1,studentCode:'001',name:'An',history}],scores,scoreBook:{},settings:{studentPrioritySubjects:{'2026 - 2027:HK1':{'001':personal}}}},now);
 }
 const score=(date,value,subject='Toán')=>({studentCode:'001',date,score:value,subject,title:'Bài kiểm tra'});
 assert.equal(run([score('2026-10-01',5)]).academic[0].level,1);

@@ -1,0 +1,27 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const M=require('./class-hub-model.js');
+const now=new Date('2026-10-17T10:00:00Z'),p=M.period('week',now);
+assert.deepEqual([p.start,p.end,p.priorStart,p.priorEnd],['2026-10-12','2026-10-18','2026-10-05','2026-10-11']);
+assert.equal(M.day('2026-10-11T19:00:00Z'),'2026-10-12');
+assert.equal(M.day('31/02/2026'),'');assert.equal(M.day('17/10/2026'),'2026-10-17');
+const data={students:[{id:'google-HS01',studentCode:'HS01',points:90,stars:4,history:[{date:'2026-10-05',points:3},{date:'2026-10-12',points:12},{date:'2026-10-16',points:-2},{date:'2026-10-18',points:100},{date:'invalid',points:500}]}],scoreBook:{loaded:true,tests:[{code:'A',subjectCode:'TOAN',date:'10/10/2026'},{code:'B',subjectCode:'TOAN',date:'17/10/2026'},{code:'C',subjectCode:'VAN',date:'16/10/2026'}],students:[{studentCode:'HS01',scores:{A:{score:'6,5'},B:{score:8},C:{score:''}}}]},homeHomework:{updatedAt:'2026-10-17',records:[{studentCode:'HS01',date:'2026-10-12',subjectCode:'TOAN',status:'missing',updatedAt:'2026-10-12'},{studentCode:'HS01',date:'2026-10-12',subjectCode:'TOAN',status:'supplemented',updatedAt:'2026-10-13'}]},attendanceRecords:{'2026-10-12':{'google-HS01':'unexcused'}}};
+assert.equal(M.ranks(data,p,'points')[0].value,10);assert.equal(M.ranks(data,p,'progress')[0].value,7);assert.equal(M.ranks(data,p,'academic')[0].value,1.5);
+assert.equal(M.evidence(data,data.students[0],p).homework.length,0);assert.equal(M.evidence(data,data.students[0],p).attendance.length,1);
+const migrated=M.migrate({students:data.students,companions:[{id:3,studentId:'google-HS01',issue:'Cần hỗ trợ'}]});assert.equal(migrated.companions[0].studentCode,'HS01');assert.equal(migrated.companions[0].status,'active');
+const book=new Map(),cache=new Map();let locked=false;
+function sheet(name){const rows=[];return {rows,getLastRow:()=>rows.length,getMaxRows:()=>10000,setFrozenRows:()=>{},insertRowsAfter:()=>{},getRange(r,c,h=1,w=1){return {setNumberFormat(){return this;},setValues(values){values.forEach((row,i)=>{rows[r+i-1] ||= [];row.forEach((value,j)=>rows[r+i-1][c+j-1]=value);});return this;},getDisplayValues(){return Array.from({length:h},(_,i)=>Array.from({length:w},(_,j)=>String(rows[r+i-1]?.[c+j-1]??'')));}};}};}
+const ss={getSheetByName:n=>book.get(n),insertSheet(n){const s=sheet(n);book.set(n,s);return s;}};
+const context={assertAdminKey(k){if(k!=='test-key')throw Error('Denied');},SpreadsheetApp:{getActiveSpreadsheet:()=>ss,flush(){}},CacheService:{getScriptCache:()=>({put:(k,v)=>cache.set(k,v),get:k=>cache.get(k)})},LockService:{getScriptLock:()=>({waitLock(){assert(!locked);locked=true;},releaseLock(){locked=false;}})},Utilities:{base64Decode:s=>Buffer.from(s,'base64'),newBlob:b=>({getDataAsString:()=>Buffer.from(b).toString('utf8')})},console};
+vm.createContext(context);const backend=fs.readFileSync(__dirname+'/Code.gs','utf8');vm.runInContext(backend.slice(backend.indexOf('/* Private teacher data.')),context);
+const api=(mode,p={})=>context.classHubHandle({mode,adminKey:'test-key',...p});
+assert.throws(()=>context.classHubHandle({mode:'hub-read',adminKey:'wrong'}),/Denied/);assert.equal(api('hub-read').revision,0);
+const payload={schema:1,students:[{studentCode:'HS01',history:[{reason:'=FORMULA & Tiếng Việt',points:5}]}],companions:[],recognitions:[],groups:[],rewards:[],redemptions:[],settings:{},admin:{},theme:{},criteria:{}};
+const encoded=Buffer.from(JSON.stringify(payload)).toString('base64');
+api('hub-stage',{tx:'test_transaction_1',index:0,total:1,data:encoded});
+assert.equal(api('hub-commit',{tx:'test_transaction_1',total:1,revision:0}).revision,1);
+assert.equal(api('hub-commit',{tx:'test_transaction_1',total:1,revision:0}).revision,1,'commit idempotent');
+assert.equal(api('hub-read').snapshot.students[0].history[0].reason,'=FORMULA & Tiếng Việt');
+api('hub-stage',{tx:'test_transaction_2',index:0,total:1,data:encoded});assert.equal(api('hub-commit',{tx:'test_transaction_2',total:1,revision:0}).conflict,true);
+assert.throws(()=>api('hub-commit',{tx:'test_transaction_3',total:1,revision:1}),/hết hạn/);assert.equal(api('hub-read').revision,1);
+assert.equal(locked,false);assert.equal(book.get('DONG_BO_LOP').rows.length,2);
+console.log('PASS: periods/timezone, real ranks, score-book adapter, homework corrections, stable IDs, backend auth, atomic revisions, idempotency, conflict and incomplete upload');

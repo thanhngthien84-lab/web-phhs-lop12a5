@@ -148,6 +148,7 @@
     <link rel="stylesheet" href="./teacher-mobile.css?v=1">
     <script src="./teacher-mobile.js?v=1" defer></script>
     <script src="./teacher-auth.js?v=1" defer></script>
+<link rel="stylesheet" href="class-hub.css?v=20261017">
 </head>
 <body>
     <!-- App Mount Points -->
@@ -2009,7 +2010,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
 
         function renderViewDoiQua() {
             const selectedStudentId = state.selectedStudentForRewards || null;
-            const student = state.students.find(s => s.id === selectedStudentId);
+            const student = state.students.find(s => String(s.id) === String(selectedStudentId));
             const sortedStudents = [...state.students].sort((a, b) => (b.stars||0) - (a.stars||0));
             
             const studentListHtml = sortedStudents.map(s => `
@@ -2064,7 +2065,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                             <div class="w-20 h-20 bg-gradient-to-br from-yellow-300 to-orange-500 text-white rounded-3xl flex items-center justify-center shadow-[0_10px_30px_rgba(245,158,11,0.5)] border-2 border-white/30 transform -rotate-6"><i class="ph-fill ph-gift text-4xl"></i></div>
                             <div class="flex-1 w-full text-center sm:text-left">
                                 <div class="text-[11px] text-indigo-200 font-bold uppercase tracking-widest mb-2">BƯỚC 1: CHỌN NGƯỜI ĐỔI QUÀ</div>
-                                <select onchange="selectStudentForRewards(parseInt(this.value))" class="w-full text-xl md:text-2xl font-black text-white bg-transparent focus:outline-none cursor-pointer border-b-2 border-white/30 pb-3 focus:border-white transition-colors">
+                                <select onchange="selectStudentForRewards(this.value)" class="w-full text-xl md:text-2xl font-black text-white bg-transparent focus:outline-none cursor-pointer border-b-2 border-white/30 pb-3 focus:border-white transition-colors">
                                     <option value="" class="text-slate-800">-- Nhấp để chọn học sinh --</option>
                                     ${state.students.map(s => `<option value="${s.id}" class="text-slate-800" ${s.id === selectedStudentId ? 'selected' : ''}>${s.name} (${s.stars} sao)</option>`).join('')}
                                 </select>
@@ -2126,7 +2127,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
 
                 const sortedMembers = [...g.members].sort((a,b) => (b.points || 0) - (a.points || 0));
                 let membersListHtml = sortedMembers.map((m, i) => `
-                    <div class="flex items-center gap-3.5 bg-white p-3 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer group/member mb-2" onclick="switchTab('tich-diem'); selectStudentForPoints(${m.id})">
+                    <div class="flex items-center gap-3.5 bg-white p-3 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer group/member mb-2" onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(m.id)})">
                         <div class="text-[10px] font-bold text-slate-300 w-3 text-center">${i+1}</div>
                         ${getAvatarImg(m.avatarUrl, m.name, "w-10 h-10 flex-shrink-0 group-hover/member:scale-110 transition-transform")}
                         <div class="flex-1 min-w-0">
@@ -2891,7 +2892,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
             // Hiển thị modal người thắng
             let actionBtnHtml = '';
             if (pickTarget === 'student') {
-                actionBtnHtml = `<button onclick="switchTab('tich-diem'); selectStudentForPoints(${winner.data.id}); closeModal('random-result-modal');" class="mt-8 px-10 py-4 bg-emerald-500 text-white font-black rounded-2xl shadow-lg hover:bg-emerald-600 transition-all hover:-translate-y-1 w-full flex items-center justify-center gap-2 text-lg"><i class="ph-fill ph-star text-xl"></i> KHEN THƯỞNG</button>`;
+                actionBtnHtml = `<button onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(winner.data.id)}); closeModal('random-result-modal');" class="mt-8 px-10 py-4 bg-emerald-500 text-white font-black rounded-2xl shadow-lg hover:bg-emerald-600 transition-all hover:-translate-y-1 w-full flex items-center justify-center gap-2 text-lg"><i class="ph-fill ph-star text-xl"></i> KHEN THƯỞNG</button>`;
             }
 
             const isDark = pickerBg !== 'default';
@@ -4844,7 +4845,7 @@ window.openEditGroupModal = function(id) {
                     ${getAvatarImg(winner.avatarUrl, winner.name, 'relative z-10 w-36 h-36 shadow-xl mb-6 ring-4 ring-white group-hover:scale-105 transition-transform')}
                     <div class="relative z-10 text-3xl font-black text-slate-800 mb-2 leading-tight">${winner.name}</div>
                     <div class="relative z-10 text-[11px] font-bold text-slate-500 uppercase bg-white border border-slate-200 px-4 py-1.5 rounded-xl">${group.name}</div>
-                    <button onclick="switchTab('tich-diem'); selectStudentForPoints(${winner.id}); closeModal('random-result-modal');" class="relative z-10 mt-8 w-full py-3.5 bg-blueAccent text-white font-black rounded-xl shadow-md hover:bg-blue-600 flex items-center justify-center gap-2 transition-all hover:-translate-y-1"><i class="ph-fill ph-star text-lg"></i> KHEN THƯỞNG</button>
+                    <button onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(winner.id)}); closeModal('random-result-modal');" class="relative z-10 mt-8 w-full py-3.5 bg-blueAccent text-white font-black rounded-xl shadow-md hover:bg-blue-600 flex items-center justify-center gap-2 transition-all hover:-translate-y-1"><i class="ph-fill ph-star text-lg"></i> KHEN THƯỞNG</button>
                 </div>
             `;
             showRandomResultModal(`Thành viên - ${group.name}`, content);
@@ -4875,7 +4876,7 @@ window.openEditGroupModal = function(id) {
                             <div class="relative z-10 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">${g.name}</div>
                             ${getAvatarImg(winner.avatarUrl, winner.name, 'relative z-10 w-24 h-24 shadow-md mb-5 ring-4 ring-slate-50 group-hover:scale-110 transition-transform')}
                             <div class="relative z-10 text-base font-black text-slate-800 text-center break-words w-full mb-4 leading-tight">${winner.name}</div>
-                            <button onclick="switchTab('tich-diem'); selectStudentForPoints(${winner.id}); closeModal('random-result-modal');" class="relative z-10 mt-auto w-full py-2.5 bg-blue-50 text-blueAccent font-bold rounded-xl hover:bg-blue-100 transition-colors">Chọn</button>
+                            <button onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(winner.id)}); closeModal('random-result-modal');" class="relative z-10 mt-auto w-full py-2.5 bg-blue-50 text-blueAccent font-bold rounded-xl hover:bg-blue-100 transition-colors">Chọn</button>
                         </div>
                     `;
                 }
@@ -8668,6 +8669,8 @@ window.deleteHistoryRecord = function(studentId, historyId) {
         };
     </script>
 <script src="home-results.js?v=conduct-period-20261015"></script>
+<script src="class-hub-model.js?v=20261017"></script>
+<script src="class-hub.js?v=20261017"></script>
 </body>
 </html>
 

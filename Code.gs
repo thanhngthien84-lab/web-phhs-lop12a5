@@ -13,6 +13,10 @@ function doGet(e) {
   const mode = String(parameters.mode || "student").trim().toLowerCase();
 
   try {
+    if (['hub-read', 'hub-stage', 'hub-commit'].includes(mode)) {
+      return output(classHubHandle(parameters), callback);
+    }
+
     // Lightweight authentication: never open or scan a spreadsheet here.
     if (mode === "admin-check") {
       assertAdminKey(parameters.adminKey);
@@ -629,7 +633,8 @@ function inspectScoreSheetSetup(ss) {
   }
 
   const studentCount = values.slice(5).filter(row =>
-    String(row[0] || "").trim() || String(row[1] || "").trim()
+    String(row[0] || "").trim() !== SCORE_AVERAGE_ROW_CODE &&
+    (String(row[0] || "").trim() || String(row[1] || "").trim())
   ).length;
 
   return createSheetCheck(
@@ -1026,6 +1031,7 @@ function saveStudentRecordsBulk(ss, inputs) {
       .setValues(identityRows);
 
     SpreadsheetApp.flush();
+    readScoreSheetWithAverages(ss);
     return savedStudents;
   } finally {
     lock.releaseLock();
@@ -1125,6 +1131,7 @@ function saveStudentRecord(ss, input) {
     writeStudentIdentityRow(commentSheet, commentIdentity.targetRow, studentCode, name);
 
     SpreadsheetApp.flush();
+    readScoreSheetWithAverages(ss);
     return {
       studentCode: studentCode,
       name: name,
@@ -1247,6 +1254,7 @@ function getClassList() {
   const sheet = ss.getSheetByName("HOC_SINH");
   if (!sheet) throw new Error('Không tìm thấy sheet "HOC_SINH".');
 
+  ensureParentAccessColumn(sheet);
   const values = sheet.getDataRange().getDisplayValues();
   if (values.length < 2) return [];
 
@@ -1258,6 +1266,7 @@ function getClassList() {
   const legacyLookupColumn = lookupColumn >= 0 ? lookupColumn : phoneColumn;
   const blockColumn = headers.indexOf("khoithi");
   const goalColumn = headers.indexOf("tongdiemmuctieu");
+  const parentAccessColumn = headers.indexOf("thoidiemtruycapphhs");
 
   return values.slice(1)
     .filter(row => String(row[idColumn] || "").trim() || String(row[nameColumn] || "").trim())
@@ -1267,7 +1276,10 @@ function getClassList() {
       parentPhone: phoneColumn >= 0 ? String(row[phoneColumn] || "").trim() : "",
       lookupCode: legacyLookupColumn >= 0 ? String(row[legacyLookupColumn] || "").trim() : "",
       khoiThi: blockColumn >= 0 ? String(row[blockColumn] || "").trim() : "",
-      tongDiemMucTieu: goalColumn >= 0 ? String(row[goalColumn] || "").trim() : ""
+      tongDiemMucTieu: goalColumn >= 0 ? String(row[goalColumn] || "").trim() : "",
+      parentLastAccessAt: parentAccessColumn >= 0
+        ? String(row[parentAccessColumn] || "").trim()
+        : ""
     }));
 }
 
@@ -1289,8 +1301,13 @@ function getStudentData(lookupCode) {
 
   const blockColumn = studentHeaders.indexOf("khoithi");
   const goalColumn = studentHeaders.indexOf("tongdiemmuctieu");
+  let studentRowIndex = -1;
   const studentRow = studentValues.slice(1)
-    .find(row => normalizePhone(row[lookupColumn]) === lookupCode);
+    .find((row, index) => {
+      const isMatch = normalizePhone(row[lookupColumn]) === lookupCode;
+      if (isMatch) studentRowIndex = index + 2;
+      return isMatch;
+    });
   if (!studentRow) return null;
 
   const student = {
@@ -1300,13 +1317,51 @@ function getStudentData(lookupCode) {
     tongDiemMucTieu: goalColumn >= 0 ? String(studentRow[goalColumn] || "").trim() : ""
   };
 
-  return {
+  const result = {
     student: student,
     scores: readScores(ss, student.studentCode),
     comments: readComments(ss, student.studentCode),
     attendance: readAttendance(ss, student.studentCode),
     homework: readHomework(ss, student.studentCode)
   };
+
+  const parentAccessColumn = ensureParentAccessColumn(studentSheet);
+  result.student.parentLastAccessAt = recordParentAccess(
+    studentSheet,
+    studentRowIndex,
+    parentAccessColumn
+  );
+
+  return result;
+}
+
+function ensureParentAccessColumn(sheet) {
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0]
+    .map(normalizeHeader);
+  const existingColumn = headers.indexOf("thoidiemtruycapphhs");
+
+  if (existingColumn >= 0) return existingColumn + 1;
+
+  const newColumn = lastColumn + 1;
+  sheet.getRange(1, newColumn)
+    .setValue("ThoiDiemTruyCapPHHS")
+    .setFontWeight("bold");
+  return newColumn;
+}
+
+function recordParentAccess(sheet, rowIndex, columnIndex) {
+  const now = new Date();
+  const formatted = Utilities.formatDate(
+    now,
+    "Asia/Ho_Chi_Minh",
+    "dd/MM/yyyy HH:mm:ss"
+  );
+
+  sheet.getRange(rowIndex, columnIndex)
+    .setNumberFormat("@")
+    .setValue(formatted);
+  return formatted;
 }
 
 function getScoreSubjectMap() {
@@ -1320,13 +1375,105 @@ function getScoreSubjectMap() {
   };
 }
 
+// A stable marker distinguishes formulas from student records, regardless of row number.
+const SCORE_AVERAGE_ROW_CODE = "__CLASS_AVERAGE__";
+
+function scoreColumnLetter(column) {
+  let label = "";
+  while (column > 0) {
+    column--;
+    label = String.fromCharCode(65 + column % 26) + label;
+    column = Math.floor(column / 26);
+  }
+  return label;
+}
+
+function validScoreNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const number = typeof value === "number" ? value : Number(String(value).trim().replace(",", "."));
+  return Number.isFinite(number) && number >= 0 && number <= 10 ? number : null;
+}
+
+// Run manually once after deployment, or let the first score request initialize it.
+function setupClassAverageFormulas() {
+  return readScoreSheetWithAverages(SpreadsheetApp.getActiveSpreadsheet()).averageRow;
+}
+
+function readScoreSheetWithAverages(ss) {
+  const lock = LockService.getScriptLock();
+  const ownsLock = !lock.hasLock();
+  if (ownsLock) lock.waitLock(20000);
+  try {
+    const sheet = ss.getSheetByName("BANG_DIEM_WEB");
+    if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
+    const roster = ss.getSheetByName("HOC_SINH");
+    if (!roster) throw new Error('Không tìm thấy sheet "HOC_SINH".');
+    const rosterValues = roster.getDataRange().getDisplayValues();
+    const idColumn = requireColumn((rosterValues[0] || []).map(normalizeHeader), "mahs", "Mã HS");
+    const rosterCodes = rosterValues.slice(1).map(row => normalizeStudentCode(row[idColumn])).filter(Boolean);
+    const studentCodes = new Set(rosterCodes);
+    if (studentCodes.size !== rosterCodes.length) throw new Error('Mã học sinh bị trùng trong HOC_SINH.');
+    if (studentCodes.has(SCORE_AVERAGE_ROW_CODE)) throw new Error('Mã __CLASS_AVERAGE__ chỉ dành cho hàng Điểm TB lớp.');
+    let values = sheet.getDataRange().getDisplayValues();
+    const lastColumn = Math.max(sheet.getLastColumn(), 2);
+    const markers = [];
+    let lastStudentRow = 5;
+    const seen = new Set();
+    for (let index = 5; index < values.length; index++) {
+      const code = String(values[index][0] || "").trim();
+      if (code === SCORE_AVERAGE_ROW_CODE) { markers.push(index + 1); continue; }
+      const normalized = normalizeStudentCode(code);
+      if (!studentCodes.has(normalized)) continue;
+      if (seen.has(normalized)) throw new Error('Mã học sinh bị trùng trong BANG_DIEM_WEB: ' + code);
+      seen.add(normalized);
+      lastStudentRow = index + 1;
+    }
+    if (markers.length > 1) throw new Error('BANG_DIEM_WEB có nhiều hàng Điểm TB lớp.');
+    let averageRow = markers[0] || 0;
+    let changed = false;
+    // Students may have been appended below an existing formula row by an import.
+    if (!averageRow || averageRow <= lastStudentRow) {
+      if (averageRow) sheet.getRange(averageRow, 1, 1, lastColumn).clearContent();
+      averageRow = Math.max(sheet.getLastRow() + 1, lastStudentRow + 1, 6);
+      if (averageRow > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), averageRow - sheet.getMaxRows());
+      sheet.getRange(averageRow, 1, 1, 2).setValues([[SCORE_AVERAGE_ROW_CODE, "Điểm TB lớp"]]);
+      changed = true;
+    }
+    const formulas = lastColumn > 2 ? sheet.getRange(averageRow, 3, 1, lastColumn - 2).getFormulas()[0] : [];
+    const rosterColumn = scoreColumnLetter(idColumn + 1);
+    const rosterRange = "'HOC_SINH'!$" + rosterColumn + "$2:$" + rosterColumn;
+    const endRow = averageRow - 1;
+    const identities = "$A$6:$A$" + endRow;
+    for (let column = 2; column < lastColumn; column++) {
+      const code = String((values[2] || [])[column] || "").trim().toUpperCase();
+      if (!/^(TOAN|VAN|ANH|LY|HOA|SINH)_BAI_\d+$/.test(code)) continue;
+      const letter = scoreColumnLetter(column + 1);
+      const scores = letter + "6:" + letter + endRow;
+      const formula = endRow < 6 ? '=IFERROR(1/0,"")' :
+        '=IFERROR(AVERAGE(FILTER(' + scores + ',ISNUMBER(' + scores + '),IFERROR(' + scores + '>=0,FALSE),IFERROR(' + scores + '<=10,FALSE),' + identities + '<>"",IFERROR(COUNTIF(' + rosterRange + ',' + identities + ')=1,FALSE))),"")';
+      if (formulas[column - 2] !== formula) {
+        sheet.getRange(averageRow, column + 1).setFormula(formula).setNumberFormat("0.00");
+        changed = true;
+      }
+    }
+    if (changed) SpreadsheetApp.flush();
+    const range = sheet.getDataRange();
+    values = range.getDisplayValues();
+    // Read raw formula results; display formatting must not alter their precision.
+    const rawValues = range.getValues();
+    return { values: values, rawValues: rawValues, notes: range.getNotes(), averageRow: averageRow, studentCodes: studentCodes };
+  } finally {
+    if (ownsLock) lock.releaseLock();
+  }
+}
+
 function readScoreBookForAdmin(ss) {
   const sheet = ss.getSheetByName("BANG_DIEM_WEB");
   if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
 
-  const range = sheet.getDataRange();
-  const values = range.getDisplayValues();
-  const notes = range.getNotes();
+  const scoreData = readScoreSheetWithAverages(ss);
+  const values = scoreData.values;
+  const notes = scoreData.notes;
   const subjectMap = getScoreSubjectMap();
   const tests = [];
   const rows = [];
@@ -1341,13 +1488,6 @@ function readScoreBookForAdmin(ss) {
       const match = code.match(/^(TOAN|VAN|ANH|LY|HOA|SINH)_BAI_(\d+)$/);
       if (!match || !String(titles[column] || "").trim()) continue;
 
-      const validScores = [];
-      for (let row = 5; row < values.length; row++) {
-        const rawScore = String(values[row][column] || "").trim();
-        if (!rawScore) continue;
-        const score = Number(rawScore.replace(",", "."));
-        if (Number.isFinite(score)) validScores.push(score);
-      }
 
       tests.push({
         code: code,
@@ -1356,9 +1496,7 @@ function readScoreBookForAdmin(ss) {
         number: Number(match[2]),
         title: String(titles[column] || "").trim(),
         date: String(dates[column] || "").trim(),
-        classAverage: validScores.length
-          ? validScores.reduce((sum, score) => sum + score, 0) / validScores.length
-          : null
+        classAverage: validScoreNumber((scoreData.rawValues[scoreData.averageRow - 1] || [])[column])
       });
     }
   }
@@ -1366,7 +1504,7 @@ function readScoreBookForAdmin(ss) {
   for (let row = 5; row < values.length; row++) {
     const studentCode = normalizeStudentCode(values[row][0]);
     const name = String(values[row][1] || "").trim();
-    if (!studentCode && !name) continue;
+    if (!scoreData.studentCodes.has(studentCode)) continue;
 
     const scores = {};
     tests.forEach(test => {
@@ -1465,7 +1603,7 @@ function archiveScoreTest(ss, testCode) {
             score: String(cell.getDisplayValue() || "").trim(),
             note: String(cell.getNote() || "").trim()
           };
-        }).filter(item => item.studentCode)
+        }).filter(item => item.studentCode && item.studentCode !== SCORE_AVERAGE_ROW_CODE)
       : [];
 
     const archive = getScoreArchiveSheet(ss, true);
@@ -1583,7 +1721,7 @@ function saveScoreBookForAdmin(ss, input, teacherIdentity) {
 
     identityValues.forEach((row, index) => {
       const code = normalizeStudentCode(row[0]);
-      if (code) rowByStudentCode[code] = index + 6;
+      if (code && code !== SCORE_AVERAGE_ROW_CODE) rowByStudentCode[code] = index + 6;
     });
 
     classStudents.forEach(student => {
@@ -1634,9 +1772,9 @@ function readScores(ss, studentCode) {
   const sheet = ss.getSheetByName("BANG_DIEM_WEB");
   if (!sheet) return [];
 
-  const range = sheet.getDataRange();
-  const values = range.getDisplayValues();
-  const notes = range.getNotes();
+  const scoreData = readScoreSheetWithAverages(ss);
+  const values = scoreData.values;
+  const notes = scoreData.notes;
   if (values.length < 6) return [];
 
   const codes = values[2] || [];
@@ -1660,27 +1798,20 @@ function readScores(ss, studentCode) {
 
     if (!match || !String(titles[column] || "").trim()) continue;
 
-    const classScores = [];
-    for (let row = 5; row < values.length; row++) {
-      const rawClassScore = String(values[row][column] || "").trim();
-      if (!rawClassScore) continue;
-      const classScore = Number(rawClassScore.replace(",", "."));
-      if (Number.isFinite(classScore)) classScores.push(classScore);
-    }
-    const classAverage = classScores.length
-      ? classScores.reduce((sum, score) => sum + score, 0) / classScores.length
-      : null;
+    const classAverage = validScoreNumber((scoreData.rawValues[scoreData.averageRow - 1] || [])[column]);
 
     for (let row = 5; row < values.length; row++) {
-      const code = String(values[row][0] || "").trim();
+      const code = normalizeStudentCode(values[row][0]);
       const rawScore = String(values[row][column] || "").trim();
 
-      if (code !== studentCode || !rawScore) continue;
+      if (!scoreData.studentCodes.has(code) || code !== normalizeStudentCode(studentCode) || !rawScore) continue;
 
-      const score = Number(rawScore.replace(",", "."));
-      if (!Number.isFinite(score)) continue;
+      const score = validScoreNumber(scoreData.rawValues[row][column]);
+      if (typeof scoreData.rawValues[row][column] !== "number" || score === null) continue;
 
       result.push({
+        testCode: String(codes[column]).trim().toUpperCase(),
+        testNumber: Number(String(codes[column]).trim().match(/_BAI_(\d+)$/i)[1]),
         subject: subjectMap[match[1]],
         title: String(titles[column]).trim(),
         date: String(dates[column] || "").trim(),
@@ -2187,4 +2318,80 @@ function saveHomework(ss, input) {
  SpreadsheetApp.flush();
  return {savedCount:updates.length};
  }finally{lock.releaseLock();}
+}
+
+/* Private teacher data. These modes are dispatched after admin authentication. */
+function classHubHandle(p) {
+  assertAdminKey(p.adminKey);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const mode = String(p.mode);
+  const cache = CacheService.getScriptCache();
+  if (mode === 'hub-read') return classHubRead(ss);
+  const tx = String(p.tx || '');
+  if (!/^[a-zA-Z0-9_-]{12,90}$/.test(tx)) throw new Error('Mã phiên lưu không hợp lệ.');
+  if (mode === 'hub-stage') {
+    const index = Number(p.index), total = Number(p.total), data = String(p.data || '');
+    if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || total > 800 || index < 0 || index >= total || !/^[A-Za-z0-9+/=]{1,5000}$/.test(data)) throw new Error('Gói dữ liệu không hợp lệ.');
+    cache.put('hub:' + tx + ':' + index, JSON.stringify({total:total,data:data}), 1800);
+    return {ok:true, staged:index};
+  }
+  if (mode !== 'hub-commit') throw new Error('Chức năng đồng bộ không hợp lệ.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    let versions = ss.getSheetByName('DONG_BO_LOP');
+    const rows = versions && versions.getLastRow() > 1 ? versions.getRange(2,1,versions.getLastRow()-1,5).getDisplayValues() : [];
+    const prior = rows.find(r => r[1] === tx);
+    if (prior) return {ok:true, revision:Number(prior[0]), tx:tx, updatedAt:prior[3]};
+    const revision = rows.length ? Number(rows[rows.length-1][0]) : 0;
+    if (Number(p.revision) !== revision) return {ok:false, conflict:true, message:'Dữ liệu trên Sheet đã đổi từ phiên khác. Hãy tải bản trên Sheet hoặc xuất bản nháp trước khi hợp nhất.'};
+    const total = Number(p.total);
+    if (!Number.isInteger(total) || total < 1 || total > 800) throw new Error('Số gói dữ liệu không hợp lệ.');
+    let encoded = '';
+    for (let i=0;i<total;i++) {
+      const raw = cache.get('hub:' + tx + ':' + i);
+      if (!raw) throw new Error('Gói dữ liệu tạm đã hết hạn. Bản nháp vẫn được giữ trên máy.');
+      const part = JSON.parse(raw);
+      if (part.total !== total) throw new Error('Gói dữ liệu không đồng nhất.');
+      encoded += part.data;
+    }
+    const json = Utilities.newBlob(Utilities.base64Decode(encoded)).getDataAsString('UTF-8');
+    if (json.length > 1500000) throw new Error('Dữ liệu vượt 1,5 triệu ký tự. Hãy giảm kích thước ảnh trước khi đồng bộ.');
+    const snapshot = JSON.parse(json);
+    if (!snapshot || snapshot.schema !== 1 || ['students','companions','recognitions','groups','rewards','redemptions'].some(k=>!Array.isArray(snapshot[k])) || ['settings','admin','theme','criteria'].some(k=>!snapshot[k] || typeof snapshot[k]!=='object' || Array.isArray(snapshot[k]))) throw new Error('Cấu trúc dữ liệu lớp không hợp lệ.');
+    const studentCodes=snapshot.students.map(s=>String(s.studentCode||'').trim());
+    if (studentCodes.some(code=>!code) || new Set(studentCodes).size!==studentCodes.length) throw new Error('Mã học sinh trong bản đồng bộ bị thiếu hoặc trùng.');
+    // Fixed columns and JSON cells prevent user values becoming Sheet formulas.
+    const chunks = [];
+    for (let offset=0;offset<json.length;) {
+      let end=Math.min(offset+25000,json.length);
+      const last=json.charCodeAt(end-1),next=json.charCodeAt(end);
+      if (last>=0xD800 && last<=0xDBFF && next>=0xDC00 && next<=0xDFFF) end--;
+      chunks.push([tx,String(chunks.length),'JSON:'+json.slice(offset,end)]);
+      offset=end;
+    }
+    let dataSheet = ss.getSheetByName('DU_LIEU_LOP');
+    if (!dataSheet) { dataSheet=ss.insertSheet('DU_LIEU_LOP'); dataSheet.getRange(1,1,1,3).setValues([['PhienLuu','Phan','JSON']]); dataSheet.setFrozenRows(1); }
+    const start=dataSheet.getLastRow()+1;
+    if (start+chunks.length-1>dataSheet.getMaxRows()) dataSheet.insertRowsAfter(dataSheet.getMaxRows(),start+chunks.length-1-dataSheet.getMaxRows());
+    dataSheet.getRange(start,1,chunks.length,3).setNumberFormat('@').setValues(chunks);
+    SpreadsheetApp.flush();
+    if (!versions) { versions=ss.insertSheet('DONG_BO_LOP'); versions.getRange(1,1,1,5).setValues([['PhienBan','PhienLuu','SoPhan','CapNhatLuc','DongBatDau']]); versions.setFrozenRows(1); }
+    if (versions.getLastRow()+1>versions.getMaxRows()) versions.insertRowsAfter(versions.getMaxRows(),1000);
+    const updatedAt=new Date().toISOString();
+    versions.getRange(versions.getLastRow()+1,1,1,5).setNumberFormat('@').setValues([[String(revision+1),tx,String(chunks.length),updatedAt,String(start)]]);
+    SpreadsheetApp.flush();
+    return {ok:true, revision:revision+1, tx:tx, updatedAt:updatedAt};
+  } finally { lock.releaseLock(); }
+}
+
+function classHubRead(ss) {
+  const versions=ss.getSheetByName('DONG_BO_LOP');
+  if (!versions || versions.getLastRow()<2) return {ok:true, revision:0, snapshot:null, tx:''};
+  const row=versions.getRange(versions.getLastRow(),1,1,5).getDisplayValues()[0];
+  const data=ss.getSheetByName('DU_LIEU_LOP');
+  if (!data) throw new Error('Thiếu bảng dữ liệu lớp. Không ghi đè; hãy kiểm tra Sheet.');
+  const chunks=data.getRange(Number(row[4]),1,Number(row[2]),3).getDisplayValues();
+  if (chunks.some((r,i)=>r[0]!==row[1] || Number(r[1])!==i || !r[2].startsWith('JSON:'))) throw new Error('Bản lưu chưa đầy đủ. Không ghi đè; hãy kiểm tra Sheet.');
+  return {ok:true, revision:Number(row[0]), tx:row[1], updatedAt:row[3], snapshot:JSON.parse(chunks.map(r=>r[2].slice(5)).join(''))};
 }
