@@ -6,7 +6,7 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
 (async()=>{
  const browser=await chromium.launch({channel:'msedge',headless:true});
  try {
-  let parentPrivateReads=0,snapshot=null,revision=0,tx='',failCommit=false,stageCount=0,readCount=0,commitCount=0,slowStage=false,releaseStage;
+  let parentPrivateReads=0,snapshot=null,revision=0,tx='',failCommit=false,stageCount=0,readCount=0,commitCount=0,slowStage=false,releaseStage,failSources=false;
   const chunks=new Map();const errors=[];
   async function createPage(seed=true,parent=false) {
    const page=await browser.newPage({viewport:{width:1280,height:720}});
@@ -32,7 +32,7 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
       else {snapshot=JSON.parse(Buffer.from(Array.from({length:Number(params.total)},(_,i)=>chunks.get(params.tx+':'+i)).join(''),'base64').toString('utf8'));revision++;tx=params.tx;response={ok:true,revision,tx,updatedAt:new Date().toISOString()};}
      }
      if(mode==='hw-list')response={ok:true,posts:[]};
-     if(mode==='score-book')response={ok:true,scoreBook:{tests:[],students:[],loaded:true},updatedAt:today};
+     if(mode==='score-book')response=failSources?{ok:false,message:'Nguồn điểm tạm lỗi'}:{ok:true,scoreBook:{tests:[{code:'low',date:M.shift(today,-8),subjectCode:'TOAN'},{code:'high',date:today,subjectCode:'HOA'}],students:[{studentCode:'HS01',scores:{low:{score:4},high:{score:9}}}],loaded:true},updatedAt:today};
      if(mode==='homework')response={ok:true,records:[],students:[]};
      if(mode==='weekly-comments')response={ok:true,records:[],students:[],weeks:[]};
      return route.fulfill({contentType:'application/javascript',body:params.callback+'('+JSON.stringify(response)+');'});
@@ -44,7 +44,7 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
   const page=await createPage();await page.waitForFunction(()=>window.ClassHub?.status().cloud==='migration');
   assert.equal(stageCount,0,'never upload old device data implicitly');
   await page.evaluate(()=>switchTab('tram-dong-hanh'));
-  await page.locator('[data-hub="support-edit"]').click();
+  await page.waitForFunction(()=>state.hubScoreSource?.loaded);assert.equal(await page.evaluate(()=>state.scoreBook.loaded),false,'hub reads grades without loading grade editor');await page.locator('[data-hub="support-edit"]').click();
   assert.equal(await page.locator('[name="studentCode"]').inputValue(),'HS01');
   await page.locator('[name="goal"]').fill('Hoàn thành bài tập trong hai tuần');
   await page.locator('[name="reviewDate"]').fill(M.shift(today,7));
@@ -78,6 +78,16 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
   assert.equal(await page.locator('[name="support-homework-min"]').inputValue(),'3');
   assert.equal(await page.evaluate(()=>state.settings.hubRules.support.homework.min),1,'defaults only fill the form');
   await page.locator('[data-hub-form="criteria"] button[type="submit"]').click();await page.evaluate(()=>ClassHub.save());
+  await page.locator('[data-hub="criteria-add"][data-value="support"]').click();
+  let custom=page.locator('[data-rule-target="support"]').last();await custom.locator('input[name$="-name"]').fill('Cần hỗ trợ Toán');await custom.locator('select[name$="-subject"]').selectOption('TOAN');
+  await page.locator('[data-hub="criteria-add"][data-value="recognition"]').click();custom=page.locator('[data-rule-target="recognition"]').last();await custom.locator('input[name$="-name"]').fill('Điểm Hoá nổi bật');await custom.locator('select[name$="-subject"]').selectOption('HOA');
+  await page.evaluate(()=>{state.scoreDrafts={low:{HS01:{score:'7'}}};});failSources=true;await page.evaluate(()=>ClassHub.refreshSources());assert.equal(await page.evaluate(()=>state.scoreDrafts.low.HS01.score),'7','grade drafts are untouched');assert.equal(await custom.locator('input[name$="-name"]').inputValue(),'Điểm Hoá nổi bật','source failure preserves unsaved criteria');assert.match(await page.locator('#hub-source-panel').innerText(),/Nguồn điểm tạm lỗi/);failSources=false;
+  await page.locator('[data-hub="criteria-preview"]').click();assert.match(await page.locator('#hub-criteria-preview').innerText(),/Điểm Hoá nổi bật/);
+  await page.locator('[data-hub-form="criteria"] button[type="submit"]').click();await page.evaluate(()=>ClassHub.save());assert.equal(snapshot.settings.hubRules.support.custom.length,1);assert.equal(snapshot.settings.hubRules.recognition.custom.length,1);
+  const customType='custom:'+snapshot.settings.hubRules.recognition.custom[0].id;
+  await page.evaluate(()=>switchTab('xep-hang'));await page.locator('[data-hub="rank-type"][data-value="'+customType+'"]').click();await page.locator('[data-hub="recognize"]').click();await page.locator('[name=reason]').fill('Điểm Hoá từ 8');await page.locator('form button[type=submit]').click();assert.equal(await page.evaluate(()=>state.recognitions.at(-1).typeName),'Điểm Hoá nổi bật');
+  await page.locator('[data-hub="criteria-settings"]').click();await page.locator('[data-rule-target="recognition"] [data-hub="criteria-remove"]').click();await page.locator('[data-hub-form="criteria"] button[type="submit"]').click();await page.evaluate(()=>ClassHub.save());
+  await page.evaluate(()=>switchTab('xep-hang'));assert.match(await page.locator('#main-content').innerText(),/Điểm Hoá nổi bật/,'removed category preserves approval name and history');
   slowStage=true;await page.evaluate(()=>{state.students[0].points=30;saveData();window.hubTestSave=ClassHub.save();});
   while(!releaseStage)await new Promise(r=>setTimeout(r,10));
   await page.evaluate(()=>{state.students[0].points=31;saveData();});releaseStage();await page.evaluate(()=>window.hubTestSave);
@@ -98,7 +108,7 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
   failCommit=false;await page.evaluate(()=>ClassHub.load());assert.equal(await page.evaluate(()=>ClassHub.status().cloud),'conflict');
   await page.evaluate(()=>{switchTab('cai-dat');switchSettingsTab('du-lieu');});await page.locator('[data-hub="use-local"]').click();await page.waitForFunction(()=>ClassHub.status().cloud==='ready'&&!ClassHub.status().dirty);assert.equal(snapshot.students[0].points,51);
   const second=await createPage(false);await second.waitForFunction(()=>ClassHub?.status().cloud==='ready'&&state.students.length>0);
-  assert.equal(await second.evaluate(()=>state.students[0].points),51);assert.equal(await second.evaluate(()=>state.companions[0].status),'completed');assert.equal(await second.evaluate(()=>state.settings.hubRules.support.homework.min),3,'criteria synced to second device');
+  assert.equal(await second.evaluate(()=>state.students[0].points),51);assert.equal(await second.evaluate(()=>state.companions[0].status),'completed');assert.equal(await second.evaluate(()=>state.settings.hubRules.support.homework.min),3,'criteria synced to second device');assert.equal(await second.evaluate(()=>state.settings.hubRules.support.custom[0].name),'Cần hỗ trợ Toán','custom rules synced');
   revision++;await second.evaluate(()=>{state.students[0].points=60;saveData();});await second.evaluate(()=>ClassHub.save());assert.equal(await second.evaluate(()=>ClassHub.status().cloud),'conflict');assert.equal(snapshot.students[0].points,51);
   await page.setViewportSize({width:390,height:844});
   for(const tab of ['tram-dong-hanh','xep-hang','cai-dat','hoc-sinh','nhom-thi-dua','doi-qua','bao-cao']) {
@@ -108,7 +118,7 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
   await page.evaluate(()=>{switchTab('cai-dat');switchSettingsTab('tieu-chi');});await page.waitForTimeout(100);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,'criteria form mobile viewport');
   await page.screenshot({path:path.join(root,'preview-class-hub-rules-mobile.png')});
-  await page.setViewportSize({width:1280,height:800});await page.screenshot({path:path.join(root,'preview-class-hub-rules-desktop.png')});
+  await page.setViewportSize({width:1280,height:800});await page.screenshot({path:path.join(root,'preview-class-hub-rules-desktop.png')});await page.locator('[data-rule-target="support"]').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(root,'preview-class-hub-custom-desktop.png')});await page.setViewportSize({width:390,height:844});await page.locator('[data-rule-target="support"]').scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,'custom criterion mobile viewport');await page.screenshot({path:path.join(root,'preview-class-hub-custom-mobile.png')});
   const parent=await createPage(false,true);await parent.waitForTimeout(200);assert.equal(await parent.evaluate(()=>ClassHub.status().cloud),'idle','parent does not load private hub');assert.equal(await parent.locator('#hub-save-status').count(),0);assert.equal(parentPrivateReads,0);
   assert.deepEqual(errors,[]);await page.screenshot({path:path.join(root,'preview-class-hub-mobile.png'),fullPage:true});
   await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>switchTab('tram-dong-hanh'));await page.locator('[data-hub-select="support-status"]').selectOption('all');await page.screenshot({path:path.join(root,'preview-class-hub-desktop.png')});

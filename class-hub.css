@@ -3,3 +3,5 @@
 .hub-mobile-status{display:block;width:100%;margin-bottom:16px;padding:9px 12px;text-align:left;border:1px solid #c7d2fe;border-radius:12px;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:800;line-height:1.5}.hub-card p{overflow-wrap:anywhere}@media(min-width:768px){.hub-mobile-status{display:none}}
 
 .hub-fields .hub-criteria-toggle{display:flex;align-items:center;gap:10px;margin:0 0 14px}.hub-fields .hub-criteria-toggle input[type=checkbox]{width:22px;height:22px;min-height:22px;flex-shrink:0;accent-color:#4338ca}.hub-fields fieldset{margin:0;padding-top:14px}.hub-fields fieldset>label{margin-bottom:12px}.hub-criteria-actions{margin-top:16px}#hub-criteria-preview{margin-top:12px}
+
+.hub-custom-rule{display:grid;gap:10px}.hub-custom-rule .hub-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}.hub-custom-rule legend{max-width:100%;overflow-wrap:anywhere}[data-custom-list]+button{margin-top:14px}.hub-custom-rule input[type=hidden]{display:none}

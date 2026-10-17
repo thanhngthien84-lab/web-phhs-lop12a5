@@ -40,8 +40,16 @@ Trang quản lý vẫn dùng Apps Script và Google Sheet của lớp 12A5. Cổ
 
 ## Tùy chỉnh tiêu chí
 
-Vào Cài đặt → Tiêu chí đồng hành & tuyên dương, hoặc bấm Chỉnh tiêu chí ngay trên hai trang. Có thể bật/tắt từng điều kiện và sửa ngưỡng. Trạm hỗ trợ đạt ít nhất một / đạt tất cả tiêu chí đang bật; tắt cả bốn sẽ không gợi ý. Tuyên dương cho chỉnh mức điểm/mức tăng, số ghi nhận hoặc số môn cần so sánh, bật/tắt hạng mục và giới hạn số đề xuất hiển thị.
+Vào Cài đặt → Tiêu chí đồng hành & tuyên dương, hoặc bấm Chỉnh tiêu chí ngay trên hai trang. Có thể bật/tắt từng điều kiện và sửa ngưỡng. Trạm hỗ trợ đạt ít nhất một / đạt tất cả tiêu chí đang bật; tắt mọi tiêu chí sẽ không gợi ý. Tuyên dương cho chỉnh mức điểm/mức tăng, số ghi nhận hoặc số môn cần so sánh, bật/tắt hạng mục và giới hạn số đề xuất hiển thị.
 
-Xem trước danh sách chỉ đọc dữ liệu đã tải, không lưu cấu hình hoặc tạo hồ sơ. Điền tiêu chí mặc định chỉ điền biểu mẫu, cần bấm Lưu tiêu chí mới áp dụng. Cấu hình được lưu trong settings.hubRules qua snapshot đang có; không cần đổi backend phiên bản 30 hoặc chuyển dữ liệu lần đầu lại. Dữ liệu cũ chưa có cấu hình dùng các mặc định cũ. Hồ sơ và tuyên dương đã duyệt giữ nguyên; các lần duyệt mới lưu kèm bộ tiêu chí tại thời điểm duyệt.
+Xem trước danh sách chỉ đọc dữ liệu đã tải, không lưu cấu hình hoặc tạo hồ sơ. Điền tiêu chí mặc định chỉ điền biểu mẫu, cần bấm Lưu tiêu chí mới áp dụng. Cấu hình được lưu trong settings.hubRules qua snapshot đang có; không cần đổi backend phiên bản 30 hoặc chuyển dữ liệu lần đầu lại. Dữ liệu cũ giữ các ngưỡng đã lưu; phạm vi điểm kiểm tra chưa được cấu hình dùng 4 tuần gần nhất. Hồ sơ và tuyên dương đã duyệt giữ nguyên; các lần duyệt mới lưu kèm bộ tiêu chí tại thời điểm duyệt.
 
 Kiểm thử thêm: node test-class-hub-rules.cjs. Bộ kiểm thử trình duyệt có kiểm tra xem trước không ghi dữ liệu, lưu thay đổi tác động đến đề xuất và cấu hình được đọc lại trên thiết bị thứ hai.
+
+## Tiêu chí tự thêm và dữ liệu điểm
+
+Nút + Thêm tiêu chí ở mỗi phần cho tạo tên và điều kiện riêng: chọn dữ liệu (điểm, thi đua, điểm danh, BTVN, tiến bộ, hoàn thành đồng hành), phép so sánh, giá trị, môn, thời gian và từ khóa thi đua. Mỗi phần tối đa 50 tiêu chí; có thể bật/tắt, sửa và bỏ khỏi biểu mẫu rồi Lưu tiêu chí. Đồng hành kết hợp cả tiêu chí sẵn có và tự thêm theo một/tất cả. Mỗi tiêu chí Tuyên dương tạo một hạng mục riêng; lịch sử đã duyệt giữ tên và bằng chứng dù sau này bỏ tiêu chí. Không suy ra điểm trung bình 0 hoặc thành tích không vi phạm khi chưa có bằng chứng.
+
+Trạm, Tuyên dương và trang tiêu chí tự đọc bảng điểm/BTVN qua quyền quản trị hiện có, tối đa một lần mỗi phút khi mở trang. Nút Tải điểm và BTVN mới nhất cho đọc lại ngay. Dùng bản đọc riêng, không ghi đè sổ điểm và bản nháp đang nhập. Không đưa cache nguồn vào snapshot dữ liệu chung. Lỗi nguồn hiển thị rõ và giữ dữ liệu đã đọc trước.
+
+Điểm kiểm tra thấp có phạm vi riêng: mặc định 4 tuần gần nhất, hoặc kỳ đang chọn, hoặc toàn bộ lịch sử đến hôm nay. Thống kê hiển thị số điểm, số bài dưới ngưỡng trong/ngoài kỳ và số bài thiếu ngày hợp lệ. Điểm tương lai, trống, sai thang 0–10 hoặc thiếu ngày không tạo gợi ý. Các tiêu chí đếm được tính theo từng học sinh. Hệ thống tự tạo gợi ý; giáo viên vẫn duyệt/lập kế hoạch trước khi thành hồ sơ đồng hành và duyệt trước khi thành tuyên dương.

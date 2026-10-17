@@ -35,3 +35,25 @@ assert.throws(()=>UI.parse({...v,'support-scores-below':'11'}),/Ngưỡng/);
 assert.throws(()=>UI.parse({...v,'support-logic':'never'}),/kết hợp/);
 assert.equal(M.rules({settings:{hubRules:{support:{homework:{min:-3}}}}}).support.homework.min,3,'malformed saved config falls back safely');
 console.log('PASS: any/all, disabled criteria, threshold boundaries, active exclusion, configurable recognition, limits, validation, legacy defaults and side-effect-free preview');
+
+// Realistic Sheet gradebook, dates outside this week, comma decimals and invalid dates.
+const gradeData={students:[{id:'s1',studentCode:'A',history:[]}],settings:{hubRules:M.defaultRules()},scoreBook:{loaded:false,draftTest:{code:'draft'}},hubScoreSource:{loaded:true,updatedAt:'2026-10-17T12:00:00Z',scoreBook:{tests:[{code:'old',date:'06/10/2026',subjectCode:'TOAN'},{code:'ancient',date:'01/08/2026',subjectCode:'TOAN'},{code:'future',date:'2026-11-01',subjectCode:'TOAN'},{code:'undated',date:'',subjectCode:'TOAN'},{code:'good',date:p.start,subjectCode:'HOA'}],students:[{studentCode:'A',scores:{old:{score:'4,5'},ancient:{score:3},future:{score:2},undated:{score:1},good:{score:9}}}]}}};
+assert.equal(M.supportSuggestions(gradeData,p).length,1,'grades load independently of academic page, last28 includes last week');
+let diagnostics=M.scoreDiagnostics(gradeData,p);assert.equal(diagnostics.lowScope,1);assert.equal(diagnostics.lowAll,2);assert.equal(diagnostics.undated,1);assert.equal(diagnostics.total,5);
+gradeData.settings.hubRules.support.scores.window='selected';assert.equal(M.supportSuggestions(gradeData,p).length,0);
+gradeData.settings.hubRules.support.scores.window='all';assert.equal(M.scoreDiagnostics(gradeData,p).lowScope,2,'all excludes future and undated');
+assert.equal(gradeData.scoreBook.draftTest.code,'draft','reading source does not mutate grade drafts');
+const custom={id:'rule1',name:'Cần hỗ trợ Toán',metric:'lowScores',operator:'gte',threshold:1,scoreCutoff:5,subject:'TOAN',keyword:'',window:'last28',enabled:true};
+for(const type of ['negative','absences','homework','scores'])gradeData.settings.hubRules.support[type].enabled=false;
+gradeData.settings.hubRules.support.custom=[custom];assert.equal(M.supportSuggestions(gradeData,p).length,1,'custom-only support rule');
+custom.subject='HOA';assert.equal(M.supportSuggestions(gradeData,p).length,0,'subject filter');custom.subject='TOAN';custom.enabled=false;assert.equal(M.supportSuggestions(gradeData,p).length,0);custom.enabled=true;
+gradeData.settings.hubRules.recognition.custom=[{...custom,id:'good',name:'Điểm Hoá nổi bật',metric:'highScores',subject:'HOA',scoreCutoff:8}];
+assert.equal(M.ranks(gradeData,p,'custom:good')[0].value,1,'custom recognition category');
+assert.equal(M.evaluateCustom(gradeData,gradeData.students[0],p,{...custom,metric:'averageScore',subject:'ANH',operator:'lte',threshold:5}).pass,false,'missing grades never become zero average');
+assert.equal(M.evaluateCustom(gradeData,gradeData.students[0],p,{...custom,metric:'negative',operator:'lte',threshold:0}).pass,false,'no evidence is not a zero-incident award');
+gradeData.students[0].history=[{date:p.start,points:-1,reason:'Đi muộn'},{date:p.start,points:-1,reason:'Thiếu đồ dùng'}];
+assert.equal(M.evaluateCustom(gradeData,gradeData.students[0],p,{...custom,metric:'negative',keyword:'đi muộn'}).value,1);
+const cv={...v,'custom-support-r1-id':'r1','custom-support-r1-name':'Toán dưới 5','custom-support-r1-enabled':'on','custom-support-r1-metric':'lowScores','custom-support-r1-operator':'gte','custom-support-r1-threshold':'2','custom-support-r1-scoreCutoff':'5','custom-support-r1-window':'last28','custom-support-r1-subject':'TOAN'};
+assert.equal(UI.parse(cv).support.custom[0].threshold,2);assert.throws(()=>UI.parse({...cv,'custom-support-r1-name':''}),/Tên/);assert.throws(()=>UI.parse({...cv,'custom-support-r1-threshold':'NaN'}),/Giá trị/);
+assert.match(UI.render(M.rules(gradeData)),/Thêm tiêu chí tuyên dương/);assert.equal(M.customRules([{...custom,id:'<script>'}]).length,0);
+console.log('PASS: custom rules, filtered recognition, grade source, last28/all scope, missing dates, draft preservation, keyword, validation');

@@ -13,6 +13,7 @@
   const notice=(text,warn=false)=>`<div class="hub-notice ${warn?'warn':''}">${esc(text)}</div>`;
   let applying=false, initialized=false, baseline='', extras={}, dirty=false, saveTimer, revision=0, lastTx='', cloud='idle', remote=null, busy=false, message='Chưa kết nối dữ liệu chung', changedDuringLoad=false;
   let periodKind='week', rankType='points', supportStatus='active', supportStudent='', settingsTab='thong-tin';
+  let sourcesLoading=false,sourceAttempt=0,sourceMessage='';
   const metaKey='lop12a5_hub_meta_v1';
   const copy=value=>JSON.parse(JSON.stringify(value));
   function normalize() { M.migrate(state); }
@@ -136,36 +137,74 @@
     document.querySelector('.hub-dialog input,.hub-dialog select,.hub-dialog textarea,.hub-dialog button')?.focus({preventScroll:true});
   }
   const periodSelector=()=>`<label class="hub-muted">Khoảng thời gian <select class="hub-btn" data-hub-select="period"><option value="week" ${periodKind==='week'?'selected':''}>Tuần này</option><option value="month" ${periodKind==='month'?'selected':''}>Tháng này</option></select></label>`;
+  function recognitionLabels(config=M.rules(state).recognition){
+    return {points:'Thi đua nổi bật',progress:'Tiến bộ rèn luyện',academic:'Tiến bộ học tập',completed:'Hoàn thành đồng hành',...Object.fromEntries(config.custom.map(c=>['custom:'+c.id,c.name]))};
+  }
+  function sourcePanelContent(){
+    const d=M.scoreDiagnostics(state,M.period(periodKind));
+    return `<div class="hub-heading"><h3 class="hub-title">Dữ liệu dùng để xét tiêu chí</h3>${sourcesLoading?'<span role="status">Đang tải điểm và BTVN…</span>':button('Tải điểm và BTVN mới nhất','refresh-sources')}</div>${sourceMessage?`<p class="hub-muted" role="status">${esc(sourceMessage)}</p>`:''}<p class="hub-muted">${d.loaded?'Đã có dữ liệu điểm được tải từ Sheet.':'Chưa xác nhận đã tải điểm mới nhất; danh sách gợi ý có thể thiếu học sinh.'} ${d.total} điểm hợp lệ trên thiết bị; ${d.lowAll} bài dưới ${d.cutoff} có ngày đến hôm nay.</p><p><strong>Phạm vi điểm của Đồng hành:</strong> ${esc(d.scope.label)} (${esc(d.scope.start)} → ${esc(d.scope.today)}). Có ${d.inScope} điểm được xét, ${d.lowScope} bài dưới ${d.cutoff} của ${d.students} học sinh. Ngưỡng đang dùng: từ ${d.minimum} bài dưới ngưỡng cho mỗi học sinh.</p>${d.lowAll>d.lowScope?`<p class="hub-muted">Có ${d.lowAll-d.lowScope} bài dưới ngưỡng nằm ngoài phạm vi đang xét. Bạn có thể chọn phạm vi rộng hơn trong Chỉnh tiêu chí.</p>`:''}${d.undated?`<p class="hub-due">${d.undated} điểm thiếu ngày hợp lệ nên chưa được xét. Hãy bổ sung ngày của bài kiểm tra trong Học tập.</p>`:''}<p class="hub-muted">Kết quả là gợi ý chờ giáo viên lập kế hoạch; điểm đang nhập chưa lưu không được dùng để tự xét.</p>`;
+  }
+  const sourcePanel=()=>`<section class="hub-card" id="hub-source-panel">${sourcePanelContent()}</section>`;
+  function paintSources(){const panel=document.getElementById('hub-source-panel');if(panel)panel.innerHTML=sourcePanelContent();}
+  async function refreshSources(automatic=false){
+    if(sourcesLoading)return;sourcesLoading=true;sourceAttempt=Date.now();paintSources();
+    try{
+      const adminKey=await getGoogleAdminKey({automatic});
+      if(!adminKey){sourceMessage='Kết nối Google Sheet để tải điểm và bài tập mới nhất.';return;}
+      const results=await Promise.allSettled([request('score-book',{adminKey}),request('homework',{adminKey})]);
+      const errors=[];let updated=false;
+      if(results[0].status==='fulfilled'){
+        const response=results[0].value;
+        if(response.scoreBook&&Array.isArray(response.scoreBook.tests)&&Array.isArray(response.scoreBook.students)){
+          state.hubScoreSource={loaded:true,updatedAt:new Date().toISOString(),scoreBook:response.scoreBook};updated=true;
+        }else errors.push('Phản hồi điểm kiểm tra chưa đầy đủ.');
+      }else errors.push('Điểm kiểm tra: '+results[0].reason.message);
+      if(results[1].status==='fulfilled'&&Array.isArray(results[1].value.records)){
+        state.homeHomework={records:results[1].value.records,updatedAt:new Date().toISOString()};updated=true;
+      }else errors.push('BTVN: '+(results[1].reason?.message||'chưa nhận được dữ liệu hợp lệ.'));
+      if(updated)originalSave();
+      sourceMessage=errors.length?errors.join(' '):'Đã tải điểm và BTVN từ Sheet lúc '+new Date().toLocaleTimeString('vi-VN')+'.';
+    }catch(error){sourceMessage=error.message;}
+    finally{
+      sourcesLoading=false;
+      // Keep open forms, including unsaved criteria and support plans, intact.
+      if(['tram-dong-hanh','xep-hang'].includes(state.currentTab)&&!document.querySelector('#modal-container')?.children.length)renderLayout();
+      else paintSources();
+    }
+  }
   function supportRulesDescription() {
     const r=M.rules(state).support,parts=[];
     if(r.negative.enabled)parts.push(`từ ${r.negative.min} lần trừ điểm`);
     if(r.absences.enabled)parts.push(`từ ${r.absences.min} lần nghỉ không phép`);
     if(r.homework.enabled)parts.push(`từ ${r.homework.min} BTVN chưa đủ`);
-    if(r.scores.enabled)parts.push(`từ ${r.scores.min} bài kiểm tra dưới ${r.scores.below} điểm`);
-    return parts.length?`Tiêu chí hiện tại: ${r.logic==='all'?'đạt tất cả':'đạt ít nhất một'} — ${parts.join('; ')}. Xét trong kỳ đã chọn; giáo viên duyệt kế hoạch trước khi lập hồ sơ.`:'Cả bốn tiêu chí gợi ý đang tắt. Bạn vẫn có thể lập hồ sơ thủ công hoặc bật lại tiêu chí trong Cài đặt.';
+    if(r.scores.enabled)parts.push(`từ ${r.scores.min} bài kiểm tra dưới ${r.scores.below} điểm (${M.windowLabels[r.scores.window]})`);
+    r.custom.filter(c=>c.enabled).forEach(c=>parts.push(c.name));
+    return parts.length?`Tiêu chí hiện tại: ${r.logic==='all'?'đạt tất cả':'đạt ít nhất một'} — ${parts.join('; ')}. Mỗi tiêu chí dùng phạm vi thời gian đã cấu hình; giáo viên duyệt kế hoạch trước khi lập hồ sơ.`:'Tất cả tiêu chí gợi ý đang tắt. Bạn vẫn có thể lập hồ sơ thủ công hoặc bật lại tiêu chí trong Cài đặt.';
   }
   function recognitionRulesDescription() {
-    const c=M.rules(state).recognition,r=c[rankType];
+    const c=M.rules(state).recognition,r=rankType.startsWith('custom:')?c.custom.find(c=>c.id===rankType.slice(7)):c[rankType];
+    if(!r)return 'Hạng mục này không còn trong cấu hình hiện tại.';
     if(!r.enabled)return 'Hạng mục này đang tắt. Có thể bật lại bằng nút Chỉnh tiêu chí; lịch sử đã duyệt vẫn được giữ.';
+    if(rankType.startsWith('custom:'))return `${r.name}: ${M.metricLabels[r.metric]} ${M.operators[r.operator]} ${r.threshold}; ${M.windowLabels[r.window]}${r.subject?' · '+r.subject:''}. Hiển thị tối đa ${c.maxCandidates} đề xuất.`;
     const text=rankType==='points'?`điểm ròng từ ${r.minValue}, có ít nhất ${r.minRecords} ghi nhận trong kỳ`:rankType==='progress'?`mức tăng điểm ròng từ ${r.minValue}, ít nhất ${r.minRecords} ghi nhận ở mỗi kỳ`:rankType==='academic'?`mức tăng trung bình từ ${r.minValue} điểm, ít nhất ${r.minSubjects} môn có đủ dữ liệu so sánh`:'hồ sơ được giáo viên xác nhận hoàn thành trong kỳ';
     return `Tiêu chí hiện tại: ${text}. Hiển thị tối đa ${c.maxCandidates} đề xuất mỗi hạng mục.`;
   }
   function previewCriteria() {
     const form=document.querySelector('[data-hub-form="criteria"]');if(!form||!form.reportValidity())return;
     const values=Object.fromEntries(new FormData(form)),rules=ClassHubRulesUI.parse(values),sample={...state,settings:{...state.settings,hubRules:rules}},p=M.period(values['preview-period']);
-    const support=M.supportSuggestions(sample,p),labels={points:'Thi đua nổi bật',progress:'Tiến bộ rèn luyện',academic:'Tiến bộ học tập',completed:'Hoàn thành đồng hành'};
-    document.getElementById('hub-criteria-preview').innerHTML=`<div class="hub-notice"><strong>Bản xem trước · ${esc(p.label)}</strong><p>Gợi ý đồng hành: ${support.length} học sinh${support.length?' — '+support.slice(0,8).map(r=>esc(r.s.name)).join(', '):''}.</p>${Object.entries(labels).map(([type,label])=>{const rows=M.ranks(sample,p,type);return `<p>${esc(label)}: ${rows.length} đề xuất${rules.recognition[type].enabled?'':' (đang tắt)'}${rows.length?' — '+rows.slice(0,8).map(r=>esc(r.student.name)).join(', '):''}.</p>`;}).join('')}<p class="hub-muted">Chưa lưu thay đổi. Kết quả có thể chưa đầy đủ nếu bạn chưa tải điểm, BTVN hoặc điểm danh mới nhất.</p></div>`;
+    const support=M.supportSuggestions(sample,p),labels=recognitionLabels(rules.recognition);
+    document.getElementById('hub-criteria-preview').innerHTML=`<div class="hub-notice"><strong>Bản xem trước · ${esc(p.label)}</strong><p>Gợi ý đồng hành: ${support.length} học sinh${support.length?' — '+support.slice(0,8).map(r=>esc(r.s.name)).join(', '):''}.</p>${Object.entries(labels).map(([type,label])=>{const rows=M.ranks(sample,p,type);return `<p>${esc(label)}: ${rows.length} đề xuất${(type.startsWith('custom:')?rules.recognition.custom.find(c=>c.id===type.slice(7))?.enabled:rules.recognition[type]?.enabled)?'':' (đang tắt)'}${rows.length?' — '+rows.slice(0,8).map(r=>esc(r.student.name)).join(', '):''}.</p>`;}).join('')}<p class="hub-muted">Chưa lưu thay đổi. Kết quả có thể chưa đầy đủ nếu bạn chưa tải điểm, BTVN hoặc điểm danh mới nhất.</p></div>`;
   }
   function studentEvidence(student,p=M.period(periodKind)) {
     const e=M.evidence(state,student,p), academic=M.academic(state,student,p);
-    return `<div class="hub-actions"><span class="hub-pill">${p.label}: ${e.net>0?'+':''}${e.net} điểm thi đua</span><span class="hub-pill">${e.negative.length} ghi nhận trừ điểm</span><span class="hub-pill">${e.attendance.length} lần vắng / trễ</span><span class="hub-pill">${e.homework.length} BTVN chưa đủ</span></div><p class="hub-muted">${e.scores.length} điểm kiểm tra trong kỳ${academic.length?' · '+academic.map(c=>`${esc(c.subject)}: ${c.before} → ${c.after}`).join(' · '):''}. Thống kê dựa trên dữ liệu đã tải; ${e.loadedScores?'':'chưa xác nhận đã tải đủ điểm; '}${e.loadedHomework?'':'chưa xác nhận đã tải đủ BTVN; '}hãy tải dữ liệu ở Học tập để xem đầy đủ.</p>`;
+    return `<div class="hub-actions"><span class="hub-pill">${p.label}: ${e.net>0?'+':''}${e.net} điểm thi đua</span><span class="hub-pill">${e.negative.length} ghi nhận trừ điểm</span><span class="hub-pill">${e.attendance.length} lần vắng / trễ</span><span class="hub-pill">${e.homework.length} BTVN chưa đủ</span></div><p class="hub-muted">${e.scores.length} điểm kiểm tra trong kỳ${academic.length?' · '+academic.map(c=>`${esc(c.subject)}: ${c.before} → ${c.after}`).join(' · '):''}. Thống kê dựa trên dữ liệu đã tải; ${e.loadedScores?'':'chưa xác nhận đã tải đủ điểm; '}${e.loadedHomework?'':'chưa xác nhận đã tải đủ BTVN; '}bấm Tải điểm và BTVN mới nhất để cập nhật.</p>`;
   }
   window.renderViewTramDongHanh=function() {
     normalize();const today=M.day(new Date());
     const records=state.companions.filter(c=>(supportStatus==='all'||c.status===supportStatus||supportStatus==='review'&&c.status==='active'&&c.reviewDate&&c.reviewDate<=today)&&(!supportStudent||c.studentCode===supportStudent));
     const p=M.period(periodKind);
     const suggestions=M.supportSuggestions(state,p);
-    return wrap(heading('Trạm đồng hành','Theo dõi mục tiêu, biện pháp và quá trình hỗ trợ từng học sinh.',button('Thêm hồ sơ đồng hành','support-new','',true)+button('Chỉnh tiêu chí','criteria-settings'))+notice(supportRulesDescription())+notice('Gợi ý hỗ trợ dựa trên dữ liệu đã tải. Nội dung đồng hành nội bộ không hiển thị trên cổng PHHS.')+`<div class="hub-actions">${periodSelector()}<select aria-label="Trạng thái đồng hành" class="hub-btn" data-hub-select="support-status">${[['active','Đang đồng hành'],['review','Cần đánh giá lại'],['completed','Đã hoàn thành'],['all','Tất cả']].map(([v,l])=>`<option value="${v}" ${supportStatus===v?'selected':''}>${l}</option>`).join('')}</select>${supportStudent?button('Xem cả lớp','support-clear'):''}</div>`+(suggestions.length?card(`<h3 class="hub-title">Gợi ý cần quan tâm (${suggestions.length})</h3>${suggestions.map(({s,e,reasons})=>`<div class="hub-row"><div><strong>${esc(s.name)}</strong><p class="hub-muted">${reasons.map(esc).join(' · ')}</p></div>${button('Xem và lập kế hoạch','support-new',key(s))}</div>`).join('')}`):'')+`<div class="hub-grid">${records.map(c=>{
+    return wrap(heading('Trạm đồng hành','Theo dõi mục tiêu, biện pháp và quá trình hỗ trợ từng học sinh.',button('Thêm hồ sơ đồng hành','support-new','',true)+button('Chỉnh tiêu chí','criteria-settings'))+sourcePanel()+notice(supportRulesDescription())+notice('Gợi ý hỗ trợ dựa trên dữ liệu đã tải. Nội dung đồng hành nội bộ không hiển thị trên cổng PHHS.')+`<div class="hub-actions">${periodSelector()}<select aria-label="Trạng thái đồng hành" class="hub-btn" data-hub-select="support-status">${[['active','Đang đồng hành'],['review','Cần đánh giá lại'],['completed','Đã hoàn thành'],['all','Tất cả']].map(([v,l])=>`<option value="${v}" ${supportStatus===v?'selected':''}>${l}</option>`).join('')}</select>${supportStudent?button('Xem cả lớp','support-clear'):''}</div>`+(suggestions.length?card(`<h3 class="hub-title">Gợi ý cần quan tâm (${suggestions.length})</h3>${suggestions.map(({s,e,reasons})=>`<div class="hub-row"><div><strong>${esc(s.name)}</strong><p class="hub-muted">${reasons.map(esc).join(' · ')}</p></div>${button('Xem và lập kế hoạch','support-new',key(s))}</div>`).join('')}`):'')+`<div class="hub-grid">${records.map(c=>{
       const s=find(c.studentCode), name=s?.name||'Học sinh chưa có trong danh sách đang tải';
       return card(`<div class="hub-heading"><h3 class="hub-title">${esc(name)}</h3><span class="hub-pill">${esc({active:'Đang đồng hành',review:'Cần đánh giá lại',completed:'Đã hoàn thành'}[c.status]||c.status)}</span></div><p class="hub-muted">${esc(c.studentCode||'Chưa ghép được mã học sinh')} · Bắt đầu ${esc(c.startDate||'')}${c.reviewDate?` · <span class="${c.reviewDate<=today&&c.status!=='completed'?'hub-due':''}">Đánh giá ${esc(c.reviewDate)}</span>`:''}</p><p><strong>Vấn đề:</strong> ${esc(c.issue)}</p><p><strong>Mục tiêu:</strong> ${esc(c.goal||'Chưa đặt')}</p><p><strong>Biện pháp:</strong> ${esc(c.measures||'Chưa ghi')}</p>${s?studentEvidence(s):notice('Hồ sơ cũ chưa ghép được với học sinh. Hãy chọn lại học sinh trong Sửa kế hoạch.',true)}<div class="hub-actions">${button('Sửa kế hoạch','support-edit',String(c.id))}${button('Ghi nhận / đánh giá','support-log',String(c.id))}${s?button('Hồ sơ học sinh','profile',key(s)):''}${c.status!=='completed'?button('Hoàn thành','support-complete',String(c.id)):button('Mở lại','support-reopen',String(c.id))}</div>${c.outcome?`<p class="hub-muted"><strong>Kết quả:</strong> ${esc(c.outcome)}</p>`:''}${(c.journal||[]).slice(-3).reverse().map(j=>`<div class="hub-log">${esc(M.day(j.date))} · ${esc(j.note)}</div>`).join('')}`);
     }).join('')||card('<p>Chưa có hồ sơ ở trạng thái đang chọn.</p>')}</div>`);
@@ -181,26 +220,26 @@
   window.openEditCompanionModal=id=>supportDialog(id||'');
   window.deleteCompanion=id=>logDialog(id,true);
   window.renderViewXepHang=function() {
-    normalize();const p=M.period(periodKind),rows=M.ranks(state,p,rankType);
-    const labels={points:'Thi đua nổi bật',progress:'Tiến bộ rèn luyện',academic:'Tiến bộ học tập',completed:'Hoàn thành đồng hành'};
+    normalize();const labels=recognitionLabels();if(!labels[rankType])rankType='points';
+    const p=M.period(periodKind),rows=M.ranks(state,p,rankType),customRule=M.rules(state).recognition.custom.find(c=>'custom:'+c.id===rankType),displayPeriod=customRule?M.windowPeriod(p,customRule.window):p;
     const approved=state.recognitions.filter(r=>r.periodStart===p.start&&r.periodKind===periodKind&&r.status==='approved');
-    return wrap(heading('Tuyên dương','Đề xuất từ dữ liệu thật. Giáo viên duyệt trước khi lưu danh sách.',periodSelector()+button('Chỉnh tiêu chí','criteria-settings'))+notice(rankType==='progress'?'Tiến bộ rèn luyện = điểm ròng kỳ này trừ kỳ trước, so sánh cùng số ngày đã qua. Cần có lịch sử ở cả hai kỳ.':rankType==='academic'?'So sánh hai ngày kiểm tra gần nhất cùng môn; lấy mức tăng trung bình các môn đủ dữ liệu. Giáo viên xem xét mức độ tương đương của bài kiểm tra trước khi duyệt.':'Điểm thi đua lấy từ lịch sử cộng và trừ trong kỳ. Sao đổi quà không làm thay đổi điểm thi đua.')+notice(recognitionRulesDescription())+`<div class="hub-actions">${Object.entries(labels).map(([v,l])=>button(l,'rank-type',v,rankType===v)).join('')}</div>`+card(`<h3 class="hub-title">Đề xuất ${esc(labels[rankType])} · ${esc(p.start)} đến ${esc(p.today)}</h3>${rows.map(r=>{
+    return wrap(heading('Tuyên dương','Đề xuất từ dữ liệu thật. Giáo viên duyệt trước khi lưu danh sách.',periodSelector()+button('Chỉnh tiêu chí','criteria-settings'))+notice(rankType.startsWith('custom:')?'Hạng mục tự thêm được xét theo dữ liệu, điều kiện và thời gian bạn đã cấu hình.':rankType==='progress'?'Tiến bộ rèn luyện = điểm ròng kỳ này trừ kỳ trước, so sánh cùng số ngày đã qua. Cần có lịch sử ở cả hai kỳ.':rankType==='academic'?'So sánh hai ngày kiểm tra gần nhất cùng môn; lấy mức tăng trung bình các môn đủ dữ liệu. Giáo viên xem xét mức độ tương đương của bài kiểm tra trước khi duyệt.':'Điểm thi đua lấy từ lịch sử cộng và trừ trong kỳ. Sao đổi quà không làm thay đổi điểm thi đua.')+sourcePanel()+notice(recognitionRulesDescription())+`<div class="hub-actions">${Object.entries(labels).map(([v,l])=>button(l,'rank-type',v,rankType===v)).join('')}</div>`+card(`<h3 class="hub-title">Đề xuất ${esc(labels[rankType])} · ${esc(displayPeriod.start)} đến ${esc(displayPeriod.today)}</h3>${rows.map(r=>{
       const exists=state.recognitions.some(x=>x.status==='approved'&&x.studentCode===r.key&&x.type===rankType&&x.periodStart===p.start&&x.periodKind===periodKind);
-      return `<div class="hub-row"><div><strong>${esc(r.student.name)}</strong><p class="hub-muted">${rankType==='completed'?'Đã được xác nhận hoàn thành kế hoạch':rankType==='progress'?`${r.previous} → ${r.current} điểm ròng · tăng ${r.value}`:rankType==='academic'?r.changes.map(c=>`${esc(c.subject)}: ${c.before} → ${c.after}`).join(' · '):`${r.value} điểm ròng trong kỳ`}</p></div><div class="hub-actions">${button('Hồ sơ','profile',r.key)}${exists?'<span class="hub-pill">Đã duyệt</span>':button('Xem và duyệt','recognize',r.key,true)}</div></div>`;
-    }).join('')||'<p class="hub-muted">Chưa có học sinh đạt tiêu chí đang bật trong kỳ này. Bạn có thể tải dữ liệu mới nhất hoặc bấm Chỉnh tiêu chí để xem lại điều kiện.</p>'}`)+card(`<h3 class="hub-title">Danh sách đã duyệt trong kỳ (${approved.length})</h3>${approved.map(r=>`<div class="hub-row"><div><strong>${esc(r.studentName)}</strong><p class="hub-muted">${esc(labels[r.type]||r.type)} · ${esc(r.reason)} · ${esc(M.day(r.approvedAt))}</p></div>${button('Thu hồi','revoke',r.id)}</div>`).join('')||'<p class="hub-muted">Chưa có tuyên dương đã duyệt.</p>'}`)+card(`<details><summary class="hub-title">Lịch sử các kỳ (${state.recognitions.length})</summary>${state.recognitions.slice().reverse().map(r=>`<div class="hub-log"><strong>${esc(r.studentName)}</strong> · ${esc(labels[r.type]||r.type)} · ${esc(r.periodStart)} · ${r.status==='approved'?'Đã duyệt':'Đã thu hồi'}<p>${esc(r.reason)}</p></div>`).join('')}</details>`));
+      return `<div class="hub-row"><div><strong>${esc(r.student.name)}</strong><p class="hub-muted">${rankType.startsWith('custom:')?esc(r.reason):rankType==='completed'?'Đã được xác nhận hoàn thành kế hoạch':rankType==='progress'?`${r.previous} → ${r.current} điểm ròng · tăng ${r.value}`:rankType==='academic'?r.changes.map(c=>`${esc(c.subject)}: ${c.before} → ${c.after}`).join(' · '):`${r.value} điểm ròng trong kỳ`}</p></div><div class="hub-actions">${button('Hồ sơ','profile',r.key)}${exists?'<span class="hub-pill">Đã duyệt</span>':button('Xem và duyệt','recognize',r.key,true)}</div></div>`;
+    }).join('')||'<p class="hub-muted">Chưa có học sinh đạt tiêu chí đang bật trong kỳ này. Bạn có thể tải dữ liệu mới nhất hoặc bấm Chỉnh tiêu chí để xem lại điều kiện.</p>'}`)+card(`<h3 class="hub-title">Danh sách đã duyệt trong kỳ (${approved.length})</h3>${approved.map(r=>`<div class="hub-row"><div><strong>${esc(r.studentName)}</strong><p class="hub-muted">${esc(r.typeName||labels[r.type]||r.type)} · ${esc(r.reason)} · ${esc(M.day(r.approvedAt))}</p></div>${button('Thu hồi','revoke',r.id)}</div>`).join('')||'<p class="hub-muted">Chưa có tuyên dương đã duyệt.</p>'}`)+card(`<details><summary class="hub-title">Lịch sử các kỳ (${state.recognitions.length})</summary>${state.recognitions.slice().reverse().map(r=>`<div class="hub-log"><strong>${esc(r.studentName)}</strong> · ${esc(r.typeName||labels[r.type]||r.type)} · ${esc(r.periodStart)} · ${r.status==='approved'?'Đã duyệt':'Đã thu hồi'}<p>${esc(r.reason)}</p></div>`).join('')}</details>`));
   };
   function recognize(code) {
     const s=find(code);if(!s)return;const p=M.period(periodKind);
     const row=M.ranks(state,p,rankType).find(r=>r.key===code);
     if(!row)throw new Error('Đề xuất đã thay đổi. Hãy xem lại danh sách.');
-    dialog('Duyệt tuyên dương',`<p class="hub-title">${esc(s.name)} · ${esc(p.label)}</p>${studentEvidence(s,p)}<form class="hub-fields" data-hub-form="recognize"><input type="hidden" name="studentCode" value="${esc(code)}"><input type="hidden" name="type" value="${esc(rankType)}"><input type="hidden" name="periodKind" value="${esc(periodKind)}"><label>Lý do tuyên dương<textarea name="reason" maxlength="3000" required></textarea></label><p class="hub-muted">Lưu bản ghi tuyên dương theo dữ liệu tại thời điểm duyệt. Không tự cộng điểm và không tự công bố sang cổng PHHS.</p><button class="hub-btn primary" type="submit">Duyệt và lưu danh sách</button></form>`);
+    dialog('Duyệt tuyên dương',`<p class="hub-title">${esc(s.name)} · ${esc(p.label)}</p>${studentEvidence(s,p)}${row.reason?notice(row.reason):''}<form class="hub-fields" data-hub-form="recognize"><input type="hidden" name="studentCode" value="${esc(code)}"><input type="hidden" name="type" value="${esc(rankType)}"><input type="hidden" name="periodKind" value="${esc(periodKind)}"><label>Lý do tuyên dương<textarea name="reason" maxlength="3000" required></textarea></label><p class="hub-muted">Lưu bản ghi tuyên dương theo dữ liệu tại thời điểm duyệt. Không tự cộng điểm và không tự công bố sang cổng PHHS.</p><button class="hub-btn primary" type="submit">Duyệt và lưu danh sách</button></form>`);
   }
   function settingsView() {
     const tabs=[['thong-tin','Thông tin chung'],['quy-tac','Quy tắc thi đua'],['tieu-chi','Tiêu chí đồng hành & tuyên dương'],['du-lieu','Dữ liệu & Đồng bộ'],['nguy-hiem','Thao tác đặc biệt']];
     if(!tabs.some(([id])=>id===settingsTab))settingsTab='thong-tin';
     let body='';
     if(settingsTab==='tieu-chi') {
-      body=ClassHubRulesUI.render(M.rules(state));
+      body=sourcePanel()+ClassHubRulesUI.render(M.rules(state));
     } else if(settingsTab==='quy-tac') {
       body=card(`<h3 class="hub-title">Quy tắc dùng chung</h3><form class="hub-fields" data-hub-form="rules"><label>Đổi quà<select name="deduct"><option value="yes" ${state.settings.deductStarsOnRedeem!==false?'selected':''}>Trừ sao khi đổi quà</option><option value="no" ${state.settings.deductStarsOnRedeem===false?'selected':''}>Giữ sao khi đổi quà</option></select></label><p class="hub-muted">Điểm thi đua luôn giữ nguyên khi đổi quà. Tuyên dương tính từ lịch sử theo tuần/tháng.</p><label>Vị trí menu<select name="sidebar"><option value="left" ${state.settings.sidebarPosition!=='right'?'selected':''}>Bên trái</option><option value="right" ${state.settings.sidebarPosition==='right'?'selected':''}>Bên phải</option></select></label><button class="hub-btn primary" type="submit">Lưu quy tắc</button></form><h3 class="hub-title" style="margin-top:20px">Tiêu chí cộng / trừ điểm đang dùng</h3>${['positive','negative'].map(type=>`<p><strong>${type==='positive'?'Cộng điểm':'Trừ điểm'}</strong></p>${(state.criteria?.[type]||[]).map(c=>`<div class="hub-row"><span>${esc(c.reason)} · ${esc(c.category||'Khác')}</span><strong>${type==='positive'?'+':'−'}${esc(c.points)}</strong></div>`).join('')}`).join('')}<p class="hub-muted">Khi ghi nhận một lý do mới trong công cụ thi đua, hệ thống lưu thêm mẫu tiêu chí.</p>`);
     } else if(settingsTab==='nguy-hiem') {
@@ -283,6 +322,7 @@
     }
     paintStatus();
     if(main&&keepScroll!==null)main.scrollTop=keepScroll;
+    if((['tram-dong-hanh','xep-hang'].includes(state.currentTab)||state.currentTab==='cai-dat'&&settingsTab==='tieu-chi')&&!sourcesLoading&&Date.now()-sourceAttempt>60000)setTimeout(()=>refreshSources(true),0);
   };
   function persist() {saveData();closeModal();renderLayout();}
   async function action(name,value) {
@@ -296,6 +336,23 @@
     if(name==='sync-view'){settingsTab='du-lieu';switchTab('cai-dat');return;}
     if(name==='settings'){settingsTab=value;state.settingsTab=value;renderLayout();return;}
     if(name==='criteria-settings'){settingsTab='tieu-chi';switchTab('cai-dat');return;}
+    if(name==='refresh-sources')return refreshSources(false);
+    if(name==='criteria-add'){
+      if(!['support','recognition'].includes(value))return;
+      const list=document.querySelector(`[data-custom-list="${value}"]`);if(!list)return;
+      if(list.children.length>=50)throw new Error('Mỗi phần có tối đa 50 tiêu chí tự thêm.');
+      const c={id:uid(),name:'',enabled:true,metric:value==='support'?'lowScores':'highScores',operator:'gte',threshold:1,scoreCutoff:value==='support'?5:8,subject:'',keyword:'',window:'last28'};
+      list.insertAdjacentHTML('beforeend',ClassHubRulesUI.customRow(value,c));
+      list.querySelector(`[name="custom-${value}-${c.id}-name"]`)?.focus({preventScroll:false});
+      const preview=document.getElementById('hub-criteria-preview');if(preview)preview.textContent='Đã thêm vào biểu mẫu. Điền tiêu chí rồi xem trước / lưu để áp dụng.';
+      return;
+    }
+    if(name==='criteria-remove'){
+      const row=[...document.querySelectorAll('.hub-custom-rule')].find(row=>row.dataset.ruleId===value);
+      if(row&&confirm('Bỏ tiêu chí này khỏi biểu mẫu? Chỉ có hiệu lực sau khi bạn lưu; lịch sử đã duyệt vẫn được giữ.'))row.remove();
+      const preview=document.getElementById('hub-criteria-preview');if(preview)preview.textContent='Biểu mẫu đã thay đổi. Xem trước / lưu để áp dụng.';
+      return;
+    }
     if(name==='criteria-preview')return previewCriteria();
     if(name==='criteria-defaults'){
       if(!confirm('Điền lại các tiêu chí mặc định? Chỉ áp dụng sau khi bạn bấm Lưu tiêu chí.'))return;
@@ -360,7 +417,7 @@
         if(state.recognitions.some(r=>r.status==='approved'&&r.studentCode===v.studentCode&&r.type===v.type&&r.periodStart===p.start&&r.periodKind===v.periodKind))throw new Error('Học sinh đã được duyệt ở hạng mục này trong kỳ.');
         const row=M.ranks(state,p,v.type).find(r=>r.key===v.studentCode);
         if(!row)throw new Error('Dữ liệu đề xuất đã thay đổi; hãy xem lại.');
-        state.recognitions.push({id:uid(),studentCode:v.studentCode,studentName:s.name,type:v.type,periodKind:v.periodKind,periodStart:p.start,periodEnd:p.end,approvedAt:now,reason:v.reason.trim(),status:'approved',criteria:copy(M.rules(state).recognition),evidence:copy(v.type==='completed'?{companionId:row.companionId,outcome:row.outcome}:{value:row.value,current:row.current,previous:row.previous,changes:row.changes})});
+        state.recognitions.push({id:uid(),studentCode:v.studentCode,studentName:s.name,type:v.type,typeName:recognitionLabels()[v.type]||v.type,periodKind:v.periodKind,periodStart:p.start,periodEnd:p.end,approvedAt:now,reason:v.reason.trim(),status:'approved',criteria:copy(M.rules(state).recognition),evidence:copy(v.type==='completed'?{companionId:row.companionId,outcome:row.outcome}:{value:row.value,current:row.current,previous:row.previous,changes:row.changes,criteriaReason:row.reason||''})});
       } else if(form.dataset.hubForm==='criteria') {
         state.settings.hubRules=ClassHubRulesUI.parse(v);
       } else if(form.dataset.hubForm==='rules') {
@@ -381,6 +438,6 @@
   });
   window.addEventListener('beforeunload',event=>{if(dirty&&!isParentPortalMode()){event.preventDefault();event.returnValue='';}});
   normalize();baseline=fingerprint();try{dirty=!!JSON.parse(localStorage.getItem(metaKey)||'{}').dirty;}catch(_){}
-  window.ClassHub={load,save:saveCloud,snapshot,model:M,status:()=>({cloud,dirty,revision,message}),exportDraft};
+  window.ClassHub={load,save:saveCloud,snapshot,model:M,status:()=>({cloud,dirty,revision,message}),exportDraft,refreshSources};
   window.addEventListener('load',()=>{if(!isParentPortalMode()){normalize();baseline=fingerprint();initialized=true;load(true);}});
 }());
