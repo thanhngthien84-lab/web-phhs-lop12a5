@@ -37,3 +37,11 @@ Trang quản lý vẫn dùng Apps Script và Google Sheet của lớp 12A5. Cổ
 `node test-class-hub-browser.cjs`: Edge headless, dữ liệu giả lập và chặn dịch vụ thật; kiểm tra chuyển tiếp hồ sơ, hoàn thành, duyệt tuyên dương, thay đổi trong lúc lưu, thiết bị thứ hai, lỗi lưu, xung đột, đổi quà, điện thoại và cách ly cổng PHHS.
 
 `node test-homework-publisher.cjs` từ thư mục repo: giữ luồng quyền BTVN đang có.
+
+## Tùy chỉnh tiêu chí
+
+Vào Cài đặt → Tiêu chí đồng hành & tuyên dương, hoặc bấm Chỉnh tiêu chí ngay trên hai trang. Có thể bật/tắt từng điều kiện và sửa ngưỡng. Trạm hỗ trợ đạt ít nhất một / đạt tất cả tiêu chí đang bật; tắt cả bốn sẽ không gợi ý. Tuyên dương cho chỉnh mức điểm/mức tăng, số ghi nhận hoặc số môn cần so sánh, bật/tắt hạng mục và giới hạn số đề xuất hiển thị.
+
+Xem trước danh sách chỉ đọc dữ liệu đã tải, không lưu cấu hình hoặc tạo hồ sơ. Điền tiêu chí mặc định chỉ điền biểu mẫu, cần bấm Lưu tiêu chí mới áp dụng. Cấu hình được lưu trong settings.hubRules qua snapshot đang có; không cần đổi backend phiên bản 30 hoặc chuyển dữ liệu lần đầu lại. Dữ liệu cũ chưa có cấu hình dùng các mặc định cũ. Hồ sơ và tuyên dương đã duyệt giữ nguyên; các lần duyệt mới lưu kèm bộ tiêu chí tại thời điểm duyệt.
+
+Kiểm thử thêm: node test-class-hub-rules.cjs. Bộ kiểm thử trình duyệt có kiểm tra xem trước không ghi dữ liệu, lưu thay đổi tác động đến đề xuất và cấu hình được đọc lại trên thiết bị thứ hai.

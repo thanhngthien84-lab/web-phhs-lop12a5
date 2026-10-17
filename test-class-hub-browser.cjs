@@ -60,6 +60,24 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
   await page.evaluate(()=>ClassHub.save());assert.equal(revision,1);assert.equal(snapshot.companions[0].studentCode,'HS01');assert(!JSON.stringify(snapshot).includes('test-key'));
   assert.equal(await page.evaluate(()=>ClassHub.status().dirty),false);
   const noChangeCommits=commitCount;await page.evaluate(()=>ClassHub.save());assert.equal(commitCount,noChangeCommits,'no redundant save');
+  await page.evaluate(()=>{state.homeHomework={updatedAt:new Date().toISOString(),records:[{studentCode:'HS01',date:new Date().toISOString().slice(0,10),subjectCode:'TOAN',status:'missing'}]};switchTab('xep-hang');});
+  await page.locator('[data-hub="criteria-settings"]').click();
+  await page.locator('[name="support-homework-min"]').fill('1');
+  await page.locator('[name="recognition-points-value"]').fill('999');
+  await page.locator('[data-hub="criteria-preview"]').click();
+  assert.match(await page.locator('#hub-criteria-preview').innerText(),/Gợi ý đồng hành: 1/);
+  assert.equal(await page.evaluate(()=>state.settings.hubRules),undefined,'preview never saves rules');
+  assert.equal(await page.evaluate(()=>ClassHub.status().dirty),false);
+  await page.locator('[data-hub-form="criteria"] button[type="submit"]').click();
+  await page.evaluate(()=>ClassHub.save());
+  assert.equal(snapshot.settings.hubRules.support.homework.min,1);
+  assert.equal(snapshot.settings.hubRules.recognition.points.minValue,999);
+  await page.evaluate(()=>switchTab('xep-hang'));assert.equal(await page.locator('[data-hub="recognize"]').count(),0,'saved threshold changes actual proposals');
+  assert.equal(await page.evaluate(()=>state.recognitions.length),1,'changing criteria retains approvals');
+  await page.locator('[data-hub="criteria-settings"]').click();await page.locator('[data-hub="criteria-defaults"]').click();
+  assert.equal(await page.locator('[name="support-homework-min"]').inputValue(),'3');
+  assert.equal(await page.evaluate(()=>state.settings.hubRules.support.homework.min),1,'defaults only fill the form');
+  await page.locator('[data-hub-form="criteria"] button[type="submit"]').click();await page.evaluate(()=>ClassHub.save());
   slowStage=true;await page.evaluate(()=>{state.students[0].points=30;saveData();window.hubTestSave=ClassHub.save();});
   while(!releaseStage)await new Promise(r=>setTimeout(r,10));
   await page.evaluate(()=>{state.students[0].points=31;saveData();});releaseStage();await page.evaluate(()=>window.hubTestSave);
@@ -80,13 +98,17 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
   failCommit=false;await page.evaluate(()=>ClassHub.load());assert.equal(await page.evaluate(()=>ClassHub.status().cloud),'conflict');
   await page.evaluate(()=>{switchTab('cai-dat');switchSettingsTab('du-lieu');});await page.locator('[data-hub="use-local"]').click();await page.waitForFunction(()=>ClassHub.status().cloud==='ready'&&!ClassHub.status().dirty);assert.equal(snapshot.students[0].points,51);
   const second=await createPage(false);await second.waitForFunction(()=>ClassHub?.status().cloud==='ready'&&state.students.length>0);
-  assert.equal(await second.evaluate(()=>state.students[0].points),51);assert.equal(await second.evaluate(()=>state.companions[0].status),'completed');
+  assert.equal(await second.evaluate(()=>state.students[0].points),51);assert.equal(await second.evaluate(()=>state.companions[0].status),'completed');assert.equal(await second.evaluate(()=>state.settings.hubRules.support.homework.min),3,'criteria synced to second device');
   revision++;await second.evaluate(()=>{state.students[0].points=60;saveData();});await second.evaluate(()=>ClassHub.save());assert.equal(await second.evaluate(()=>ClassHub.status().cloud),'conflict');assert.equal(snapshot.students[0].points,51);
   await page.setViewportSize({width:390,height:844});
   for(const tab of ['tram-dong-hanh','xep-hang','cai-dat','hoc-sinh','nhom-thi-dua','doi-qua','bao-cao']) {
    await page.evaluate(tab=>switchTab(tab),tab);await page.waitForTimeout(100);
    const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);assert.equal(overflow,false,'mobile viewport '+tab);
   }
+  await page.evaluate(()=>{switchTab('cai-dat');switchSettingsTab('tieu-chi');});await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,'criteria form mobile viewport');
+  await page.screenshot({path:path.join(root,'preview-class-hub-rules-mobile.png')});
+  await page.setViewportSize({width:1280,height:800});await page.screenshot({path:path.join(root,'preview-class-hub-rules-desktop.png')});
   const parent=await createPage(false,true);await parent.waitForTimeout(200);assert.equal(await parent.evaluate(()=>ClassHub.status().cloud),'idle','parent does not load private hub');assert.equal(await parent.locator('#hub-save-status').count(),0);assert.equal(parentPrivateReads,0);
   assert.deepEqual(errors,[]);await page.screenshot({path:path.join(root,'preview-class-hub-mobile.png'),fullPage:true});
   await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>switchTab('tram-dong-hanh'));await page.locator('[data-hub-select="support-status"]').selectOption('all');await page.screenshot({path:path.join(root,'preview-class-hub-desktop.png')});
