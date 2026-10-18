@@ -5,3 +5,7 @@
 .hub-fields .hub-criteria-toggle{display:flex;align-items:center;gap:10px;margin:0 0 14px}.hub-fields .hub-criteria-toggle input[type=checkbox]{width:22px;height:22px;min-height:22px;flex-shrink:0;accent-color:#4338ca}.hub-fields fieldset{margin:0;padding-top:14px}.hub-fields fieldset>label{margin-bottom:12px}.hub-criteria-actions{margin-top:16px}#hub-criteria-preview{margin-top:12px}
 
 .hub-custom-rule{display:grid;gap:10px}.hub-custom-rule .hub-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}.hub-custom-rule legend{max-width:100%;overflow-wrap:anywhere}[data-custom-list]+button{margin-top:14px}.hub-custom-rule input[type=hidden]{display:none}
+
+[data-criteria-part][hidden]{display:none}.hub-workspace-tabs{margin-bottom:8px}.hub-table-scroll{overflow:auto}.hub-report-table{width:100%;border-collapse:collapse;font-size:14px}.hub-report-table td,.hub-report-table th{padding:10px;border-bottom:1px solid #e2e8f0;text-align:left}.hub-card details summary{cursor:pointer}.hub-fields [data-criteria-part]{display:grid;gap:16px}
+
+.hub-fields [data-criteria-part][hidden]{display:none}

@@ -7,12 +7,14 @@
   const key=M.key, uid=()=>Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
   const find=code=>(state.students||[]).find(s=>key(s)===String(code));
   const button=(label,action,value='',primary=false)=>`<button type="button" class="hub-btn ${primary?'primary':''}" data-hub="${esc(action)}" data-value="${esc(value)}">${esc(label)}</button>`;
+  const companionNav=()=>`<nav class="hub-actions hub-workspace-tabs" aria-label="Đồng hành và Tuyên dương">${button('Đồng hành','support-list','',state.currentTab==='tram-dong-hanh')}${button('Tuyên dương','rank-list','',state.currentTab==='xep-hang')}</nav>`;
+  const criteriaView=()=>wrap(companionNav()+heading('Thiết lập tiêu chí '+(criteriaTarget==='support'?'đồng hành':'tuyên dương'),'Điều kiện dùng để tạo gợi ý cho giáo viên xem xét.',button('Quay lại danh sách','criteria-back'))+sourcePanel()+ClassHubRulesUI.render(M.rules(state),criteriaTarget));
   const wrap=body=>`<div class="hub-section">${body}</div>`;
   const card=body=>`<section class="hub-card">${body}</section>`;
   const heading=(title,sub,actions='')=>`<div class="hub-heading"><div><h2>${esc(title)}</h2><p class="hub-muted">${esc(sub)}</p></div><div class="hub-actions">${actions}</div></div>`;
   const notice=(text,warn=false)=>`<div class="hub-notice ${warn?'warn':''}">${esc(text)}</div>`;
   let applying=false, initialized=false, baseline='', extras={}, dirty=false, saveTimer, revision=0, lastTx='', cloud='idle', remote=null, busy=false, message='Chưa kết nối dữ liệu chung', changedDuringLoad=false;
-  let periodKind='week', rankType='points', supportStatus='active', supportStudent='', settingsTab='thong-tin';
+  let periodKind='week', rankType='points', supportStatus='active', supportStudent='', settingsTab='thong-tin',criteriaTarget='';
   let sourcesLoading=false,sourceAttempt=0,sourceMessage='';
   const metaKey='lop12a5_hub_meta_v1';
   const copy=value=>JSON.parse(JSON.stringify(value));
@@ -168,7 +170,7 @@
     finally{
       sourcesLoading=false;
       // Keep open forms, including unsaved criteria and support plans, intact.
-      if(['tram-dong-hanh','xep-hang'].includes(state.currentTab)&&!document.querySelector('#modal-container')?.children.length)renderLayout();
+      if(['tram-dong-hanh','xep-hang'].includes(state.currentTab)&&!criteriaTarget&&!document.querySelector('#modal-container')?.children.length)renderLayout();
       else paintSources();
     }
   }
@@ -191,20 +193,21 @@
   }
   function previewCriteria() {
     const form=document.querySelector('[data-hub-form="criteria"]');if(!form||!form.reportValidity())return;
-    const values=Object.fromEntries(new FormData(form)),rules=ClassHubRulesUI.parse(values),sample={...state,settings:{...state.settings,hubRules:rules}},p=M.period(values['preview-period']);
-    const support=M.supportSuggestions(sample,p),labels=recognitionLabels(rules.recognition);
-    document.getElementById('hub-criteria-preview').innerHTML=`<div class="hub-notice"><strong>Bản xem trước · ${esc(p.label)}</strong><p>Gợi ý đồng hành: ${support.length} học sinh${support.length?' — '+support.slice(0,8).map(r=>esc(r.s.name)).join(', '):''}.</p>${Object.entries(labels).map(([type,label])=>{const rows=M.ranks(sample,p,type);return `<p>${esc(label)}: ${rows.length} đề xuất${(type.startsWith('custom:')?rules.recognition.custom.find(c=>c.id===type.slice(7))?.enabled:rules.recognition[type]?.enabled)?'':' (đang tắt)'}${rows.length?' — '+rows.slice(0,8).map(r=>esc(r.student.name)).join(', '):''}.</p>`;}).join('')}<p class="hub-muted">Chưa lưu thay đổi. Kết quả có thể chưa đầy đủ nếu bạn chưa tải điểm, BTVN hoặc điểm danh mới nhất.</p></div>`;
+    const values=Object.fromEntries(new FormData(form)),rules=ClassHubRulesUI.parse(values),sample={...state,settings:{...state.settings,hubRules:criteriaTarget?{...M.rules(state),[criteriaTarget]:rules[criteriaTarget]}:rules}},p=M.period(values['preview-period']);
+    const support=M.supportSuggestions(sample,p),labels=criteriaTarget==='support'?{}:recognitionLabels(rules.recognition);
+    document.getElementById('hub-criteria-preview').innerHTML=`<div class="hub-notice"><strong>Bản xem trước · ${esc(p.label)}</strong><p ${criteriaTarget==='recognition'?'hidden':''}>Gợi ý đồng hành: ${support.length} học sinh${support.length?' — '+support.slice(0,8).map(r=>esc(r.s.name)).join(', '):''}.</p>${Object.entries(labels).map(([type,label])=>{const rows=M.ranks(sample,p,type);return `<p>${esc(label)}: ${rows.length} đề xuất${(type.startsWith('custom:')?rules.recognition.custom.find(c=>c.id===type.slice(7))?.enabled:rules.recognition[type]?.enabled)?'':' (đang tắt)'}${rows.length?' — '+rows.slice(0,8).map(r=>esc(r.student.name)).join(', '):''}.</p>`;}).join('')}<p class="hub-muted">Chưa lưu thay đổi. Kết quả có thể chưa đầy đủ nếu bạn chưa tải điểm, BTVN hoặc điểm danh mới nhất.</p></div>`;
   }
   function studentEvidence(student,p=M.period(periodKind)) {
     const e=M.evidence(state,student,p), academic=M.academic(state,student,p);
     return `<div class="hub-actions"><span class="hub-pill">${p.label}: ${e.net>0?'+':''}${e.net} điểm thi đua</span><span class="hub-pill">${e.negative.length} ghi nhận trừ điểm</span><span class="hub-pill">${e.attendance.length} lần vắng / trễ</span><span class="hub-pill">${e.homework.length} BTVN chưa đủ</span></div><p class="hub-muted">${e.scores.length} điểm kiểm tra trong kỳ${academic.length?' · '+academic.map(c=>`${esc(c.subject)}: ${c.before} → ${c.after}`).join(' · '):''}. Thống kê dựa trên dữ liệu đã tải; ${e.loadedScores?'':'chưa xác nhận đã tải đủ điểm; '}${e.loadedHomework?'':'chưa xác nhận đã tải đủ BTVN; '}bấm Tải điểm và BTVN mới nhất để cập nhật.</p>`;
   }
   window.renderViewTramDongHanh=function() {
+    if(criteriaTarget==='support')return criteriaView();
     normalize();const today=M.day(new Date());
     const records=state.companions.filter(c=>(supportStatus==='all'||c.status===supportStatus||supportStatus==='review'&&c.status==='active'&&c.reviewDate&&c.reviewDate<=today)&&(!supportStudent||c.studentCode===supportStudent));
     const p=M.period(periodKind);
     const suggestions=M.supportSuggestions(state,p);
-    return wrap(heading('Trạm đồng hành','Theo dõi mục tiêu, biện pháp và quá trình hỗ trợ từng học sinh.',button('Thêm hồ sơ đồng hành','support-new','',true)+button('Chỉnh tiêu chí','criteria-settings'))+sourcePanel()+notice(supportRulesDescription())+notice('Gợi ý hỗ trợ dựa trên dữ liệu đã tải. Nội dung đồng hành nội bộ không hiển thị trên cổng PHHS.')+`<div class="hub-actions">${periodSelector()}<select aria-label="Trạng thái đồng hành" class="hub-btn" data-hub-select="support-status">${[['active','Đang đồng hành'],['review','Cần đánh giá lại'],['completed','Đã hoàn thành'],['all','Tất cả']].map(([v,l])=>`<option value="${v}" ${supportStatus===v?'selected':''}>${l}</option>`).join('')}</select>${supportStudent?button('Xem cả lớp','support-clear'):''}</div>`+(suggestions.length?card(`<h3 class="hub-title">Gợi ý cần quan tâm (${suggestions.length})</h3>${suggestions.map(({s,e,reasons})=>`<div class="hub-row"><div><strong>${esc(s.name)}</strong><p class="hub-muted">${reasons.map(esc).join(' · ')}</p></div>${button('Xem và lập kế hoạch','support-new',key(s))}</div>`).join('')}`):'')+`<div class="hub-grid">${records.map(c=>{
+    return wrap(companionNav()+heading('Trạm đồng hành','Theo dõi mục tiêu, biện pháp và quá trình hỗ trợ từng học sinh.',button('Thêm hồ sơ đồng hành','support-new','',true)+button('Thiết lập tiêu chí','criteria-settings'))+sourcePanel()+notice(supportRulesDescription())+notice('Gợi ý hỗ trợ dựa trên dữ liệu đã tải. Nội dung đồng hành nội bộ không hiển thị trên cổng PHHS.')+`<div class="hub-actions">${periodSelector()}<select aria-label="Trạng thái đồng hành" class="hub-btn" data-hub-select="support-status">${[['active','Đang đồng hành'],['review','Cần đánh giá lại'],['completed','Đã hoàn thành'],['all','Tất cả']].map(([v,l])=>`<option value="${v}" ${supportStatus===v?'selected':''}>${l}</option>`).join('')}</select>${supportStudent?button('Xem cả lớp','support-clear'):''}</div>`+(suggestions.length?card(`<h3 class="hub-title">Gợi ý cần quan tâm (${suggestions.length})</h3>${suggestions.map(({s,e,reasons})=>`<div class="hub-row"><div><strong>${esc(s.name)}</strong><p class="hub-muted">${reasons.map(esc).join(' · ')}</p></div>${button('Xem và lập kế hoạch','support-new',key(s))}</div>`).join('')}`):'')+`<div class="hub-grid">${records.map(c=>{
       const s=find(c.studentCode), name=s?.name||'Học sinh chưa có trong danh sách đang tải';
       return card(`<div class="hub-heading"><h3 class="hub-title">${esc(name)}</h3><span class="hub-pill">${esc({active:'Đang đồng hành',review:'Cần đánh giá lại',completed:'Đã hoàn thành'}[c.status]||c.status)}</span></div><p class="hub-muted">${esc(c.studentCode||'Chưa ghép được mã học sinh')} · Bắt đầu ${esc(c.startDate||'')}${c.reviewDate?` · <span class="${c.reviewDate<=today&&c.status!=='completed'?'hub-due':''}">Đánh giá ${esc(c.reviewDate)}</span>`:''}</p><p><strong>Vấn đề:</strong> ${esc(c.issue)}</p><p><strong>Mục tiêu:</strong> ${esc(c.goal||'Chưa đặt')}</p><p><strong>Biện pháp:</strong> ${esc(c.measures||'Chưa ghi')}</p>${s?studentEvidence(s):notice('Hồ sơ cũ chưa ghép được với học sinh. Hãy chọn lại học sinh trong Sửa kế hoạch.',true)}<div class="hub-actions">${button('Sửa kế hoạch','support-edit',String(c.id))}${button('Ghi nhận / đánh giá','support-log',String(c.id))}${s?button('Hồ sơ học sinh','profile',key(s)):''}${c.status!=='completed'?button('Hoàn thành','support-complete',String(c.id)):button('Mở lại','support-reopen',String(c.id))}</div>${c.outcome?`<p class="hub-muted"><strong>Kết quả:</strong> ${esc(c.outcome)}</p>`:''}${(c.journal||[]).slice(-3).reverse().map(j=>`<div class="hub-log">${esc(M.day(j.date))} · ${esc(j.note)}</div>`).join('')}`);
     }).join('')||card('<p>Chưa có hồ sơ ở trạng thái đang chọn.</p>')}</div>`);
@@ -220,10 +223,11 @@
   window.openEditCompanionModal=id=>supportDialog(id||'');
   window.deleteCompanion=id=>logDialog(id,true);
   window.renderViewXepHang=function() {
+    if(criteriaTarget==='recognition')return criteriaView();
     normalize();const labels=recognitionLabels();if(!labels[rankType])rankType='points';
     const p=M.period(periodKind),rows=M.ranks(state,p,rankType),customRule=M.rules(state).recognition.custom.find(c=>'custom:'+c.id===rankType),displayPeriod=customRule?M.windowPeriod(p,customRule.window):p;
     const approved=state.recognitions.filter(r=>r.periodStart===p.start&&r.periodKind===periodKind&&r.status==='approved');
-    return wrap(heading('Tuyên dương','Đề xuất từ dữ liệu thật. Giáo viên duyệt trước khi lưu danh sách.',periodSelector()+button('Chỉnh tiêu chí','criteria-settings'))+notice(rankType.startsWith('custom:')?'Hạng mục tự thêm được xét theo dữ liệu, điều kiện và thời gian bạn đã cấu hình.':rankType==='progress'?'Tiến bộ rèn luyện = điểm ròng kỳ này trừ kỳ trước, so sánh cùng số ngày đã qua. Cần có lịch sử ở cả hai kỳ.':rankType==='academic'?'So sánh hai ngày kiểm tra gần nhất cùng môn; lấy mức tăng trung bình các môn đủ dữ liệu. Giáo viên xem xét mức độ tương đương của bài kiểm tra trước khi duyệt.':'Điểm thi đua lấy từ lịch sử cộng và trừ trong kỳ. Sao đổi quà không làm thay đổi điểm thi đua.')+sourcePanel()+notice(recognitionRulesDescription())+`<div class="hub-actions">${Object.entries(labels).map(([v,l])=>button(l,'rank-type',v,rankType===v)).join('')}</div>`+card(`<h3 class="hub-title">Đề xuất ${esc(labels[rankType])} · ${esc(displayPeriod.start)} đến ${esc(displayPeriod.today)}</h3>${rows.map(r=>{
+    return wrap(companionNav()+heading('Tuyên dương','Đề xuất từ dữ liệu thật. Giáo viên duyệt trước khi lưu danh sách.',periodSelector()+button('Chỉnh tiêu chí','criteria-settings'))+notice(rankType.startsWith('custom:')?'Hạng mục tự thêm được xét theo dữ liệu, điều kiện và thời gian bạn đã cấu hình.':rankType==='progress'?'Tiến bộ rèn luyện = điểm ròng kỳ này trừ kỳ trước, so sánh cùng số ngày đã qua. Cần có lịch sử ở cả hai kỳ.':rankType==='academic'?'So sánh hai ngày kiểm tra gần nhất cùng môn; lấy mức tăng trung bình các môn đủ dữ liệu. Giáo viên xem xét mức độ tương đương của bài kiểm tra trước khi duyệt.':'Điểm thi đua lấy từ lịch sử cộng và trừ trong kỳ. Sao đổi quà không làm thay đổi điểm thi đua.')+sourcePanel()+notice(recognitionRulesDescription())+`<div class="hub-actions">${Object.entries(labels).map(([v,l])=>button(l,'rank-type',v,rankType===v)).join('')}</div>`+card(`<h3 class="hub-title">Đề xuất ${esc(labels[rankType])} · ${esc(displayPeriod.start)} đến ${esc(displayPeriod.today)}</h3>${rows.map(r=>{
       const exists=state.recognitions.some(x=>x.status==='approved'&&x.studentCode===r.key&&x.type===rankType&&x.periodStart===p.start&&x.periodKind===periodKind);
       return `<div class="hub-row"><div><strong>${esc(r.student.name)}</strong><p class="hub-muted">${rankType.startsWith('custom:')?esc(r.reason):rankType==='completed'?'Đã được xác nhận hoàn thành kế hoạch':rankType==='progress'?`${r.previous} → ${r.current} điểm ròng · tăng ${r.value}`:rankType==='academic'?r.changes.map(c=>`${esc(c.subject)}: ${c.before} → ${c.after}`).join(' · '):`${r.value} điểm ròng trong kỳ`}</p></div><div class="hub-actions">${button('Hồ sơ','profile',r.key)}${exists?'<span class="hub-pill">Đã duyệt</span>':button('Xem và duyệt','recognize',r.key,true)}</div></div>`;
     }).join('')||'<p class="hub-muted">Chưa có học sinh đạt tiêu chí đang bật trong kỳ này. Bạn có thể tải dữ liệu mới nhất hoặc bấm Chỉnh tiêu chí để xem lại điều kiện.</p>'}`)+card(`<h3 class="hub-title">Danh sách đã duyệt trong kỳ (${approved.length})</h3>${approved.map(r=>`<div class="hub-row"><div><strong>${esc(r.studentName)}</strong><p class="hub-muted">${esc(r.typeName||labels[r.type]||r.type)} · ${esc(r.reason)} · ${esc(M.day(r.approvedAt))}</p></div>${button('Thu hồi','revoke',r.id)}</div>`).join('')||'<p class="hub-muted">Chưa có tuyên dương đã duyệt.</p>'}`)+card(`<details><summary class="hub-title">Lịch sử các kỳ (${state.recognitions.length})</summary>${state.recognitions.slice().reverse().map(r=>`<div class="hub-log"><strong>${esc(r.studentName)}</strong> · ${esc(r.typeName||labels[r.type]||r.type)} · ${esc(r.periodStart)} · ${r.status==='approved'?'Đã duyệt':'Đã thu hồi'}<p>${esc(r.reason)}</p></div>`).join('')}</details>`));
@@ -234,31 +238,37 @@
     if(!row)throw new Error('Đề xuất đã thay đổi. Hãy xem lại danh sách.');
     dialog('Duyệt tuyên dương',`<p class="hub-title">${esc(s.name)} · ${esc(p.label)}</p>${studentEvidence(s,p)}${row.reason?notice(row.reason):''}<form class="hub-fields" data-hub-form="recognize"><input type="hidden" name="studentCode" value="${esc(code)}"><input type="hidden" name="type" value="${esc(rankType)}"><input type="hidden" name="periodKind" value="${esc(periodKind)}"><label>Lý do tuyên dương<textarea name="reason" maxlength="3000" required></textarea></label><p class="hub-muted">Lưu bản ghi tuyên dương theo dữ liệu tại thời điểm duyệt. Không tự cộng điểm và không tự công bố sang cổng PHHS.</p><button class="hub-btn primary" type="submit">Duyệt và lưu danh sách</button></form>`);
   }
+  function legacySettings(tab){
+    const saved=state.settingsTab;state.settingsTab=tab;const template=document.createElement('template');template.innerHTML=oldViews.settings();state.settingsTab=saved;
+    template.content.querySelector('[onclick^="switchSettingsTab"]')?.parentElement.remove();template.content.querySelector('h2')?.closest('.flex')?.remove();return template.innerHTML;
+  }
   function settingsView() {
-    const tabs=[['thong-tin','Thông tin chung'],['quy-tac','Quy tắc thi đua'],['tieu-chi','Tiêu chí đồng hành & tuyên dương'],['du-lieu','Dữ liệu & Đồng bộ'],['nguy-hiem','Thao tác đặc biệt']];
+    const tabs=[['thong-tin','Thông tin lớp & giao diện'],['du-lieu','Kết nối & sao lưu'],['nguy-hiem','Nâng cao']];
     if(!tabs.some(([id])=>id===settingsTab))settingsTab='thong-tin';
     let body='';
-    if(settingsTab==='tieu-chi') {
-      body=sourcePanel()+ClassHubRulesUI.render(M.rules(state));
-    } else if(settingsTab==='quy-tac') {
-      body=card(`<h3 class="hub-title">Quy tắc dùng chung</h3><form class="hub-fields" data-hub-form="rules"><label>Đổi quà<select name="deduct"><option value="yes" ${state.settings.deductStarsOnRedeem!==false?'selected':''}>Trừ sao khi đổi quà</option><option value="no" ${state.settings.deductStarsOnRedeem===false?'selected':''}>Giữ sao khi đổi quà</option></select></label><p class="hub-muted">Điểm thi đua luôn giữ nguyên khi đổi quà. Tuyên dương tính từ lịch sử theo tuần/tháng.</p><label>Vị trí menu<select name="sidebar"><option value="left" ${state.settings.sidebarPosition!=='right'?'selected':''}>Bên trái</option><option value="right" ${state.settings.sidebarPosition==='right'?'selected':''}>Bên phải</option></select></label><button class="hub-btn primary" type="submit">Lưu quy tắc</button></form><h3 class="hub-title" style="margin-top:20px">Tiêu chí cộng / trừ điểm đang dùng</h3>${['positive','negative'].map(type=>`<p><strong>${type==='positive'?'Cộng điểm':'Trừ điểm'}</strong></p>${(state.criteria?.[type]||[]).map(c=>`<div class="hub-row"><span>${esc(c.reason)} · ${esc(c.category||'Khác')}</span><strong>${type==='positive'?'+':'−'}${esc(c.points)}</strong></div>`).join('')}`).join('')}<p class="hub-muted">Khi ghi nhận một lý do mới trong công cụ thi đua, hệ thống lưu thêm mẫu tiêu chí.</p>`);
-    } else if(settingsTab==='nguy-hiem') {
-      body=card(`<h3 class="hub-title">Đặt lại số dư điểm / sao</h3><p class="hub-muted">Chọn học sinh, tổ hoặc cả lớp. Lịch sử thi đua, hồ sơ đồng hành và danh sách tuyên dương vẫn được giữ. Đây là thay đổi số dư, không xóa ghi nhận đã phát sinh.</p>${button('Mở công cụ đặt lại số dư','reset-balances')}`)+card(`<h3 class="hub-title">Bản dữ liệu trước khi tải từ Sheet</h3><p class="hub-muted">Mỗi lần dùng bản Sheet, hệ thống giữ một bản dữ liệu chung trước đó trên máy. Có thể phục hồi thành bản nháp rồi kiểm tra trước khi đồng bộ.</p><div class="hub-actions">${button('Xuất bản nháp hiện tại','export')}${button('Phục hồi bản trước khi tải Sheet','restore-local-backup')}</div>`);
-    } else {
-      state.settingsTab=settingsTab;body=oldViews.settings();
-      // Remove the old operational/settings navigation, retaining the existing forms.
-      const template=document.createElement('template');template.innerHTML=body;
-      template.content.querySelector('[onclick^="switchSettingsTab"]')?.parentElement.remove();template.content.querySelector('h2')?.closest('.flex')?.remove();
-      body=template.innerHTML;
-      if(settingsTab==='du-lieu')body=syncPanel()+body;
-    }
-    return wrap(heading('Cài đặt hệ thống','Cấu hình chung của lớp; thao tác hằng ngày nằm tại các chức năng tương ứng.')+`<nav class="hub-settings-nav" aria-label="Cài đặt">${tabs.map(([id,label])=>`<button type="button" class="hub-btn" data-hub="settings" data-value="${id}" ${settingsTab===id?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`+body);
+    if(settingsTab==='thong-tin')body=legacySettings('thong-tin')+card('<h3 class="hub-title">Giao diện</h3><form class="hub-fields" data-hub-form="layout-rule"><label>Vị trí menu<select name="sidebar"><option value="left" '+(state.settings.sidebarPosition!=='right'?'selected':'')+'>Bên trái</option><option value="right" '+(state.settings.sidebarPosition==='right'?'selected':'')+'>Bên phải</option></select></label><button class="hub-btn primary" type="submit">Lưu giao diện</button></form>');
+    if(settingsTab==='du-lieu')body=syncPanel()+legacySettings('du-lieu')+card('<details><summary class="hub-title">Khôi phục bản trước khi tải Sheet</summary><p class="hub-muted">Phục hồi thành bản nháp để kiểm tra trước khi đồng bộ.</p>'+button('Phục hồi bản trước khi tải Sheet','restore-local-backup')+'</details>');
+    if(settingsTab==='nguy-hiem')body=card('<details><summary class="hub-title">Đặt lại số dư điểm / sao</summary><p class="hub-muted">Chọn học sinh, tổ hoặc cả lớp. Lịch sử thi đua, hồ sơ đồng hành và tuyên dương được giữ.</p>'+button('Mở công cụ đặt lại số dư','reset-balances')+'</details>');
+    return wrap(heading('Cài đặt','Thông tin lớp, kết nối dữ liệu và các thao tác ít dùng.')+'<nav class="hub-settings-nav" aria-label="Cài đặt">'+tabs.map(([id,label])=>'<button type="button" class="hub-btn" data-hub="settings" data-value="'+id+'" '+(settingsTab===id?'aria-current="page"':'')+'>'+label+'</button>').join('')+'</nav>'+body);
   }
+  function pointsRules(){
+    dialog('Quy tắc thi đua', '<p class="hub-muted">Các mẫu cộng / trừ điểm đang dùng. Khi ghi nhận lý do mới, hệ thống lưu thêm mẫu tiêu chí.</p>'+['positive','negative'].map(type=>'<h3 class="hub-title">'+(type==='positive'?'Cộng điểm':'Trừ điểm')+'</h3>'+(state.criteria?.[type]||[]).map(c=>'<div class="hub-row"><span>'+esc(c.reason)+' · '+esc(c.category||'Khác')+'</span><strong>'+ (type==='positive'?'+':'−')+esc(c.points)+'</strong></div>').join('')).join('')+button('Ghi nhận thi đua','points','',true));
+  }
+  function rewardRules(){dialog('Quy tắc đổi quà','<form class="hub-fields" data-hub-form="reward-rule"><label>Đổi quà<select name="deduct"><option value="yes" '+(state.settings.deductStarsOnRedeem!==false?'selected':'')+'>Trừ sao khi đổi quà</option><option value="no" '+(state.settings.deductStarsOnRedeem===false?'selected':'')+'>Giữ sao khi đổi quà</option></select></label><p class="hub-muted">Điểm thi đua giữ nguyên khi đổi quà.</p><button class="hub-btn primary" type="submit">Lưu quy tắc</button></form>');}
+  function reportPreview(type){
+    const p=M.period(periodKind),learning=type==='learning';
+    const rows=(state.students||[]).map(student=>{const marks=M.scores(state,student).filter(r=>M.day(r.date)&&M.day(r.date)<=p.today),events=M.history(student,p);return '<tr><td>'+esc(student.name)+'</td><td>'+esc(key(student))+'</td>'+(learning?'<td>'+marks.length+'</td><td>'+marks.filter(r=>r.score<5).length+'</td><td>'+(marks.length?(marks.reduce((n,r)=>n+r.score,0)/marks.length).toFixed(2):'—')+'</td>':'<td>'+events.filter(r=>r.points>0).length+'</td><td>'+events.filter(r=>r.points<0).length+'</td><td>'+M.net(events)+'</td>')+'</tr>';}).join('');
+    dialog('Xuất báo cáo '+(learning?'học tập':'thi đua'),'<div id="report-container"><h3 class="hub-title">'+esc(state.admin.className||'Lớp')+' · '+(learning?'Điểm kiểm tra đã tải đến '+p.today:'Thi đua '+p.start+' đến '+p.today)+'</h3><p class="hub-muted">'+(learning?'Tổng hợp toàn bộ bài có ngày hợp lệ đã tải. Trung bình cộng tham khảo, không phải điểm tổng kết học kỳ.':'Tính từ lịch sử cộng / trừ điểm trong kỳ.')+'</p><div class="hub-table-scroll"><table class="hub-report-table"><thead><tr><th>Học sinh</th><th>Mã</th>'+(learning?'<th>Số bài</th><th>Bài dưới 5</th><th>Trung bình</th>':'<th>Lần cộng</th><th>Lần trừ</th><th>Điểm ròng</th>')+'</tr></thead><tbody>'+rows+'</tbody></table></div></div><button id="btn-export-pdf" class="hub-btn primary" onclick="exportToPDF()">Tải PDF</button>');
+  }
+  const navigateTab=switchTab;
+  window.switchTab=function(tab){criteriaTarget='';if(tab==='cai-dat')settingsTab='thong-tin';return navigateTab(tab);};
   window.renderViewCaiDat=settingsView;
   window.switchSettingsTab=function(tab) {
     if(tab==='tich-diem'){switchTab('tich-diem');return;}
     if(tab==='qua-tang'){switchTab('doi-qua');rewardCatalog();return;}
     if(tab==='btvn-quyen'){switchTab('diem-hoc-tap');window.learningSection='homework';renderLayout();return;}
+    if(tab==='tieu-chi'){switchTab('tram-dong-hanh');criteriaTarget='support';renderLayout();return;}
+    if(tab==='quy-tac'){switchTab('nhom-thi-dua');pointsRules();return;}
     settingsTab=tab;state.settingsTab=tab;renderLayout();
   };
   window.selectStudentForPoints=function(id) {
@@ -269,9 +279,9 @@
     const p=M.period('week');
     return `<div class="hub-card" style="margin-bottom:18px"><div class="hub-sync-bar"><div><strong>Theo dõi và động viên</strong><p class="hub-muted">${state.companions.filter(c=>c.status!=='completed').length} hồ sơ đang đồng hành · ${state.recognitions.filter(r=>r.status==='approved'&&r.periodKind==='week'&&r.periodStart===p.start).length} tuyên dương đã duyệt tuần này</p></div><div class="hub-actions">${button('Đồng hành','support-list')}${button('Tuyên dương','rank-list')}${button('Ghi nhận thi đua','points')}</div></div></div>`+oldViews.home();
   };
-  window.renderViewNhomThiDua=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Ghi nhận cho tổ / cả lớp','points-group','',true)}</div>`+oldViews.groups();
-  window.renderViewDoiQua=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Quản lý danh mục quà','reward-catalog')}${button('Lịch sử đổi quà','redemptions')}</div>`+oldViews.rewards();
-  window.renderViewDiemHocTap=()=>`<div class="hub-actions" style="margin-bottom:14px">${button('Quản lý người đăng BTVN','homework-admin')}</div>`+oldViews.learning();
+  window.renderViewNhomThiDua=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Ghi nhận cho tổ / cả lớp','points-group','',true)}${button('Quy tắc thi đua','points-rules')}${button('Xuất báo cáo thi đua','report','conduct')}</div>`+oldViews.groups();
+  window.renderViewDoiQua=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Quản lý danh mục quà','reward-catalog')}${button('Lịch sử đổi quà','redemptions')}${button('Quy tắc đổi quà','reward-rules')}</div>`+oldViews.rewards();
+  window.renderViewDiemHocTap=()=>`<div class="hub-actions" style="margin-bottom:14px">${button('Quản lý người đăng BTVN','homework-admin')}${button('Xuất báo cáo học tập','report','learning')}</div>`+oldViews.learning();
   window.renderViewBaoCao=()=>`<div class="hub-actions" style="margin-bottom:14px">${button('Xem các học sinh cần đồng hành','support-list')}${button('Đề xuất tuyên dương','rank-list')}</div>`+oldViews.report();
   function rewardCatalog() {
     const saved=state.settingsTab;state.settingsTab='qua-tang';const html=oldViews.settings();state.settingsTab=saved;
@@ -309,6 +319,7 @@
     document.querySelector('#parent-view-modal main')?.insertAdjacentHTML('beforeend',card(`<h3 class="hub-title">Theo dõi và động viên</h3><div class="hub-actions">${button('Ghi nhận thi đua','points',key(s))}${button('Hồ sơ đồng hành','support-student',key(s))}${button('Tuyên dương','rank-list')}</div><p class="hub-muted">${state.companions.filter(c=>c.studentCode===key(s)&&c.status!=='completed').length} kế hoạch đang theo dõi · ${state.recognitions.filter(r=>r.studentCode===key(s)&&r.status==='approved').length} lần tuyên dương đã duyệt</p>`));
   };
   window.renderLayout=function() {
+    if(['lich-bao-giang','bao-cao'].includes(state.currentTab))state.currentTab='tong-quan';
     const previousMain=document.getElementById('main-content');
     const keepScroll=previousMain?.dataset.tab===state.currentTab?previousMain.scrollTop:null;
     normalize();originalLayout();if(isParentPortalMode())return;
@@ -316,6 +327,7 @@
     if(main)main.insertAdjacentHTML('afterbegin','<button type="button" id="hub-mobile-save-status" class="hub-mobile-status md:hidden" data-hub="sync-view"></button>');
     const header=document.querySelector('#main-container header');
     if(header) {
+      if(['tram-dong-hanh','xep-hang'].includes(state.currentTab)&&header.querySelector('h2'))header.querySelector('h2').textContent='Đồng hành & Tuyên dương';
       if(state.currentTab==='tich-diem'&&header.querySelector('h2'))header.querySelector('h2').textContent='Ghi nhận thi đua';
       const badge=header.querySelector('.ph-hard-drives')?.parentElement;
       if(badge){badge.innerHTML='<button type="button" id="hub-save-status" class="hub-status" data-hub="sync-view"></button>';paintStatus();}
@@ -324,7 +336,7 @@
     if(main&&keepScroll!==null)main.scrollTop=keepScroll;
     if((['tram-dong-hanh','xep-hang'].includes(state.currentTab)||state.currentTab==='cai-dat'&&settingsTab==='tieu-chi')&&!sourcesLoading&&Date.now()-sourceAttempt>60000)setTimeout(()=>refreshSources(true),0);
   };
-  function persist() {saveData();closeModal();renderLayout();}
+  function persist() {criteriaTarget='';saveData();closeModal();renderLayout();}
   async function action(name,value) {
     if(name==='close')return closeModal();
     if(name==='load')return load();if(name==='save')return saveCloud();if(name==='export')return exportDraft();
@@ -333,9 +345,13 @@
       if(!confirm('Dùng bản trên máy để thay bản dữ liệu chung trên Sheet? Hệ thống giữ lịch sử bản cũ và kiểm tra phiên bản trước khi lưu.'))return;
       localStorage.setItem('lop12a5_hub_remote_backup_v1',JSON.stringify(remote));revision=remote.revision;setStatus('ready','Đang chuẩn bị lưu bản trên máy');return saveCloud();
     }
-    if(name==='sync-view'){settingsTab='du-lieu';switchTab('cai-dat');return;}
+    if(name==='sync-view'){switchTab('cai-dat');settingsTab='du-lieu';renderLayout();return;}
     if(name==='settings'){settingsTab=value;state.settingsTab=value;renderLayout();return;}
-    if(name==='criteria-settings'){settingsTab='tieu-chi';switchTab('cai-dat');return;}
+    if(name==='criteria-settings'){criteriaTarget=state.currentTab==='xep-hang'?'recognition':'support';renderLayout();return;}
+    if(name==='criteria-back'){criteriaTarget='';renderLayout();return;}
+    if(name==='points-rules')return pointsRules();
+    if(name==='reward-rules')return rewardRules();
+    if(name==='report')return reportPreview(value);
     if(name==='refresh-sources')return refreshSources(false);
     if(name==='criteria-add'){
       if(!['support','recognition'].includes(value))return;
@@ -356,19 +372,19 @@
     if(name==='criteria-preview')return previewCriteria();
     if(name==='criteria-defaults'){
       if(!confirm('Điền lại các tiêu chí mặc định? Chỉ áp dụng sau khi bạn bấm Lưu tiêu chí.'))return;
-      const form=document.querySelector('[data-hub-form="criteria"]');if(form){const template=document.createElement('template');template.innerHTML=ClassHubRulesUI.render(M.defaultRules());form.replaceWith(template.content);}
+      const form=document.querySelector('[data-hub-form="criteria"]');if(form){const template=document.createElement('template');template.innerHTML=ClassHubRulesUI.render(M.defaultRules(),criteriaTarget);form.replaceWith(template.content);}
       return;
     }
     if(name==='points'||name==='points-group'){closeModal();state.pointsForm.targetType=name==='points-group'?'group':'student';state.pointsForm.selectedTargetId=find(value)?.id||'';switchTab('tich-diem');return;}
     if(name==='profile')return showParentView(find(value)?.id);
-    if(name==='support-list'||name==='support-student'){supportStudent=name==='support-student'?value:'';supportStatus='all';closeModal();switchTab('tram-dong-hanh');return;}
+    if(name==='support-list'||name==='support-student'){criteriaTarget='';supportStudent=name==='support-student'?value:'';supportStatus='all';closeModal();switchTab('tram-dong-hanh');return;}
     if(name==='support-clear'){supportStudent='';renderLayout();return;}
     if(name==='support-new')return supportDialog('',value);
     if(name==='support-edit')return supportDialog(value);
     if(name==='support-log')return logDialog(value);
     if(name==='support-complete')return logDialog(value,true);
     if(name==='support-reopen'){const c=state.companions.find(c=>String(c.id)===value);if(c){c.status='active';c.journal.push({id:uid(),date:new Date().toISOString(),note:'Mở lại kế hoạch đồng hành.'});persist();}return;}
-    if(name==='rank-list'){closeModal();switchTab('xep-hang');return;}
+    if(name==='rank-list'){criteriaTarget='';closeModal();switchTab('xep-hang');return;}
     if(name==='rank-type'){rankType=value;renderLayout();return;}
     if(name==='recognize')return recognize(value);
     if(name==='revoke'){const r=state.recognitions.find(r=>r.id===value);if(r&&confirm('Thu hồi tuyên dương? Bản ghi vẫn giữ trong lịch sử.')){r.status='revoked';r.revokedAt=new Date().toISOString();persist();}return;}
@@ -419,7 +435,11 @@
         if(!row)throw new Error('Dữ liệu đề xuất đã thay đổi; hãy xem lại.');
         state.recognitions.push({id:uid(),studentCode:v.studentCode,studentName:s.name,type:v.type,typeName:recognitionLabels()[v.type]||v.type,periodKind:v.periodKind,periodStart:p.start,periodEnd:p.end,approvedAt:now,reason:v.reason.trim(),status:'approved',criteria:copy(M.rules(state).recognition),evidence:copy(v.type==='completed'?{companionId:row.companionId,outcome:row.outcome}:{value:row.value,current:row.current,previous:row.previous,changes:row.changes,criteriaReason:row.reason||''})});
       } else if(form.dataset.hubForm==='criteria') {
-        state.settings.hubRules=ClassHubRulesUI.parse(v);
+        const parsed=ClassHubRulesUI.parse(v),target=form.dataset.criteriaTarget;state.settings.hubRules=target?{...M.rules(state),[target]:parsed[target]}:parsed;
+      } else if(form.dataset.hubForm==='layout-rule') {
+        state.settings.sidebarPosition=v.sidebar;
+      } else if(form.dataset.hubForm==='reward-rule') {
+        state.settings.deductStarsOnRedeem=v.deduct==='yes';
       } else if(form.dataset.hubForm==='rules') {
         state.settings.deductStarsOnRedeem=v.deduct==='yes';state.settings.sidebarPosition=v.sidebar;
       }

@@ -148,7 +148,7 @@
     <link rel="stylesheet" href="./teacher-mobile.css?v=1">
     <script src="./teacher-mobile.js?v=1" defer></script>
     <script src="./teacher-auth.js?v=1" defer></script>
-<link rel="stylesheet" href="class-hub.css?v=20261017-custom2">
+<link rel="stylesheet" href="class-hub.css?v=20261018-nav1">
 </head>
 <body>
     <!-- App Mount Points -->
@@ -231,10 +231,7 @@
             { id: 'diem-danh', icon: 'ph-calendar-check', label: 'Điểm danh' },
             { id: 'vong-quay', icon: 'ph-cards', label: 'Gọi Tên Ngẫu Nhiên' },
             { id: 'dong-ho', icon: 'ph-timer', label: 'Công cụ' },
-            { id: 'lich-bao-giang', icon: 'ph-notebook', label: 'Lịch báo giảng' },
-            { id: 'xep-hang', icon: 'ph-trophy', label: 'Tuyên Dương' },
-           { id: 'bao-cao', icon: 'ph-chart-bar', label: 'Sổ theo dõi' },
-            { id: 'tram-dong-hanh', icon: 'ph-hands-clapping', label: 'Trạm đồng hành' },
+            { id: 'tram-dong-hanh', icon: 'ph-hands-clapping', label: 'Đồng hành & Tuyên dương' },
             { id: 'cai-dat', icon: 'ph-gear', label: 'Cài đặt' }
         ];
 
@@ -379,6 +376,7 @@ window.switchSettingsTab = function(tab) {
 };
 
 window.switchTab = function(tabId) {
+    if (['lich-bao-giang','bao-cao'].includes(tabId)) tabId='tong-quan';
     if (window.hwUI && window.hwUI.busy) return;
     if (window.hwUI && window.hwUI.dirty) {
         if (!confirm('BTVN chưa lưu. Bạn muốn rời trang và bỏ phần đang sửa?')) return;
@@ -426,7 +424,7 @@ function renderSidebar() {
         if (item.id === 'dong-ho') {
             return `<button onclick="openTimerDrawer()" class="w-full flex items-center gap-4 px-6 py-3.5 mb-2 rounded-2xl transition-all duration-300 text-indigo-200 hover:bg-white/10 hover:text-white font-semibold group"><div class="p-2 rounded-xl bg-white/5 group-hover:bg-white/20 transition-colors"><i class="ph-fill ${item.icon} text-xl"></i></div><span class="text-sm tracking-wide">${item.label}</span></button>`;
         }
-        const isActive = state.currentTab === item.id;
+        const isActive = state.currentTab === item.id || item.id === 'tram-dong-hanh' && state.currentTab === 'xep-hang';
         return `
             <button onclick="switchTab('${item.id}')" class="w-full flex items-center gap-4 px-6 py-3.5 mb-2 rounded-2xl transition-all duration-300 group relative overflow-hidden ${isActive ? 'text-white' : 'text-indigo-200 hover:text-white hover:bg-white/5'}">
                 ${isActive ? '<div class="absolute inset-0 bg-gradient-to-r from-blueAccent to-indigo-600 opacity-90"></div><div class="absolute inset-0 bg-[url(\'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wNykiLz48L3N2Zz4=\')]"></div>' : ''}
@@ -853,7 +851,6 @@ window.closeModal = function(id) {
                                 
                                 <button onclick="switchTab('tram-dong-hanh')" class="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all text-sm font-bold text-slate-700 text-left"><span class="text-xl">🤝</span> Trạm đồng hành</button>
                                 <button onclick="switchTab('vong-quay')" class="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all text-sm font-bold text-slate-700 text-left"><span class="text-xl">🎯</span> Gọi tên</button>
-                                <button onclick="switchTab('bao-cao')" class="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all text-sm font-bold text-slate-700 text-left"><span class="text-xl">📊</span> Báo cáo</button>
                                 <button onclick="openTimerDrawer()" class="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all text-sm font-bold text-slate-700 text-left"><span class="text-xl">⏱️</span> Đồng hồ</button>
                             </div>
                         </div>
@@ -8669,9 +8666,9 @@ window.deleteHistoryRecord = function(studentId, historyId) {
         };
     </script>
 <script src="home-results.js?v=conduct-period-20261015"></script>
-<script src="class-hub-model.js?v=20261017-custom2"></script>
-<script src="class-hub-rules-ui.js?v=20261017-custom2"></script>
-<script src="class-hub.js?v=20261017-custom2"></script>
+<script src="class-hub-model.js?v=20261018-nav1"></script>
+<script src="class-hub-rules-ui.js?v=20261018-nav1"></script>
+<script src="class-hub.js?v=20261018-nav1"></script>
 </body>
 </html>
 

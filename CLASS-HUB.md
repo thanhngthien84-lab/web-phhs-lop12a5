@@ -40,7 +40,7 @@ Trang quản lý vẫn dùng Apps Script và Google Sheet của lớp 12A5. Cổ
 
 ## Tùy chỉnh tiêu chí
 
-Vào Cài đặt → Tiêu chí đồng hành & tuyên dương, hoặc bấm Chỉnh tiêu chí ngay trên hai trang. Có thể bật/tắt từng điều kiện và sửa ngưỡng. Trạm hỗ trợ đạt ít nhất một / đạt tất cả tiêu chí đang bật; tắt mọi tiêu chí sẽ không gợi ý. Tuyên dương cho chỉnh mức điểm/mức tăng, số ghi nhận hoặc số môn cần so sánh, bật/tắt hạng mục và giới hạn số đề xuất hiển thị.
+Vào Đồng hành & Tuyên dương → chọn tab → Thiết lập tiêu chí. Mỗi tab chỉ sửa tiêu chí của phần đó. Có thể bật/tắt từng điều kiện và sửa ngưỡng. Trạm hỗ trợ đạt ít nhất một / đạt tất cả tiêu chí đang bật; tắt mọi tiêu chí sẽ không gợi ý. Tuyên dương cho chỉnh mức điểm/mức tăng, số ghi nhận hoặc số môn cần so sánh, bật/tắt hạng mục và giới hạn số đề xuất hiển thị.
 
 Xem trước danh sách chỉ đọc dữ liệu đã tải, không lưu cấu hình hoặc tạo hồ sơ. Điền tiêu chí mặc định chỉ điền biểu mẫu, cần bấm Lưu tiêu chí mới áp dụng. Cấu hình được lưu trong settings.hubRules qua snapshot đang có; không cần đổi backend phiên bản 30 hoặc chuyển dữ liệu lần đầu lại. Dữ liệu cũ giữ các ngưỡng đã lưu; phạm vi điểm kiểm tra chưa được cấu hình dùng 4 tuần gần nhất. Hồ sơ và tuyên dương đã duyệt giữ nguyên; các lần duyệt mới lưu kèm bộ tiêu chí tại thời điểm duyệt.
 
@@ -53,3 +53,12 @@ Nút + Thêm tiêu chí ở mỗi phần cho tạo tên và điều kiện riên
 Trạm, Tuyên dương và trang tiêu chí tự đọc bảng điểm/BTVN qua quyền quản trị hiện có, tối đa một lần mỗi phút khi mở trang. Nút Tải điểm và BTVN mới nhất cho đọc lại ngay. Dùng bản đọc riêng, không ghi đè sổ điểm và bản nháp đang nhập. Không đưa cache nguồn vào snapshot dữ liệu chung. Lỗi nguồn hiển thị rõ và giữ dữ liệu đã đọc trước.
 
 Điểm kiểm tra thấp có phạm vi riêng: mặc định 4 tuần gần nhất, hoặc kỳ đang chọn, hoặc toàn bộ lịch sử đến hôm nay. Thống kê hiển thị số điểm, số bài dưới ngưỡng trong/ngoài kỳ và số bài thiếu ngày hợp lệ. Điểm tương lai, trống, sai thang 0–10 hoặc thiếu ngày không tạo gợi ý. Các tiêu chí đếm được tính theo từng học sinh. Hệ thống tự tạo gợi ý; giáo viên vẫn duyệt/lập kế hoạch trước khi thành hồ sơ đồng hành và duyệt trước khi thành tuyên dương.
+
+## Bố trí giao diện 18/10/2026
+
+- Gỡ Lịch báo giảng và Sổ theo dõi khỏi menu máy tính, điện thoại và lối tắt; các route cũ quay về Trang chủ. Dữ liệu cũ không bị xóa.
+- Một mục Đồng hành & Tuyên dương mở hai tab. Các nút Trang chủ/Hồ sơ vẫn đi thẳng đúng tab. Nội bộ giữ route tram-dong-hanh và xep-hang để tương thích.
+- Thiết lập tiêu chí ngay trong từng tab. Lưu/điền mặc định chỉ áp dụng phần đang sửa, giữ tiêu chí của tab còn lại. Nút menu hoặc Quay lại danh sách đóng trình chỉnh.
+- Cài đặt chỉ có Thông tin lớp & giao diện, Kết nối & sao lưu, Nâng cao. Nâng cao thu gọn công cụ đặt lại số dư; khôi phục bản trước khi tải Sheet ở Kết nối & sao lưu.
+- Tổ thi đua có Quy tắc thi đua và Xuất báo cáo thi đua. Quà tặng có danh mục, lịch sử, quy tắc đổi quà. Học tập có quản lý người đăng BTVN và Xuất báo cáo học tập.
+- Báo cáo PDF dùng dữ liệu thật đã tải: thi đua trong kỳ; học tập gồm toàn bộ điểm có ngày hợp lệ đến hôm nay, trung bình cộng tham khảo và số bài dưới 5. Không thay điểm tổng kết học kỳ bằng trung bình tham khảo.
