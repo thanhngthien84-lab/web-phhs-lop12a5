@@ -6214,7 +6214,30 @@ window.performDirectLookup = function() {
         }
 
         window.parentSubject = window.parentSubject || "Toán";
-        window.changeParentSubject = function(subject, id) { window.parentSubject = subject; showParentView(id); };
+        window.changeParentSubject = function(subject, id) {
+    const modal = document.getElementById('parent-view-modal');
+    const selector = modal?.querySelector('select[onchange*="changeParentSubject"]');
+    const top = modal?.scrollTop || 0;
+    const anchorTop = selector?.getBoundingClientRect().top;
+    const hadFocus = document.activeElement === selector;
+    const details = modal ? Array.from(modal.querySelectorAll('details'), el => el.open) : [];
+    const date = modal?.querySelector('#parent-homework-date')?.value;
+    window.parentSubject = subject;
+    showParentView(id);
+    const next = document.getElementById('parent-view-modal');
+    if (!modal || !next) return;
+    next.querySelectorAll('details').forEach((el, i) => { el.open = !!details[i]; });
+    const dateInput = next.querySelector('#parent-homework-date');
+    if (dateInput && date !== undefined) {
+        dateInput.value = date;
+        updateParentHomeworkHistory(date);
+    }
+    const nextSelector = next.querySelector('select[onchange*="changeParentSubject"]');
+    // Keep the subject picker in place, even when the selected subject has fewer rows.
+    next.scrollTop = nextSelector && anchorTop !== undefined
+        ? nextSelector.getBoundingClientRect().top - anchorTop : top;
+    if (hadFocus && nextSelector) nextSelector.focus({ preventScroll: true });
+};
         function showParentView(studentId) {
           const student = state.students.find(s => s.id === studentId); if (!student) return;
           const portalMode = isParentPortalMode();
