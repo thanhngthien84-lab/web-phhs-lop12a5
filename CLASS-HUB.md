@@ -62,3 +62,7 @@ Trạm, Tuyên dương và trang tiêu chí tự đọc bảng điểm/BTVN qua 
 - Cài đặt chỉ có Thông tin lớp & giao diện, Kết nối & sao lưu, Nâng cao. Nâng cao thu gọn công cụ đặt lại số dư; khôi phục bản trước khi tải Sheet ở Kết nối & sao lưu.
 - Tổ thi đua có Quy tắc thi đua và Xuất báo cáo thi đua. Quà tặng có danh mục, lịch sử, quy tắc đổi quà. Học tập có quản lý người đăng BTVN và Xuất báo cáo học tập.
 - Báo cáo PDF dùng dữ liệu thật đã tải: thi đua trong kỳ; học tập gồm toàn bộ điểm có ngày hợp lệ đến hôm nay, trung bình cộng tham khảo và số bài dưới 5. Không thay điểm tổng kết học kỳ bằng trung bình tham khảo.
+
+## Bảo vệ dữ liệu 18/10/2026
+
+Xem DATA-PROTECTION.md: backend v31 thêm journal SAO_LUU_GHI_DIEM và phục hồi; giao diện escape dữ liệu, báo lỗi lưu cục bộ thật, lưu trữ/khôi phục học sinh và hoàn tác theo starsDelta thực tế. File xuất bản nháp có thêm deviceData (bao gồm điểm chưa lưu) để phục hồi trên máy, không đưa các cache này vào snapshot dùng chung. Lưu trữ không xóa hàng HOC_SINH hoặc thu hồi mã PHHS.

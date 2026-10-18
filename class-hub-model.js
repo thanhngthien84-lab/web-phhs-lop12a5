@@ -28,7 +28,7 @@
   }
   const inside=(v,start,end)=>{const d=day(v);return !!d&&d>=start&&d<end;};
   function history(student,p,previous=false) {
-    return (student.history||[]).filter(h=>inside(h.date,previous?p.priorStart:p.start,previous?p.priorEnd:p.end) && Number.isFinite(Number(h.points)));
+    return (student.history||[]).filter(h=>!h.reversedAt&&!h.reverses&&inside(h.date,previous?p.priorStart:p.start,previous?p.priorEnd:p.end) && Number.isFinite(Number(h.points)));
   }
   const net=rows=>rows.reduce((sum,h)=>sum+Number(h.points||0),0);
   function defaultRules() {

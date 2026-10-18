@@ -148,7 +148,7 @@
     <link rel="stylesheet" href="./teacher-mobile.css?v=1">
     <script src="./teacher-mobile.js?v=1" defer></script>
     <script src="./teacher-auth.js?v=1" defer></script>
-<link rel="stylesheet" href="class-hub.css?v=20261018-nav1">
+<link rel="stylesheet" href="class-hub.css?v=20261018-protect1">
 </head>
 <body>
     <!-- App Mount Points -->
@@ -235,8 +235,8 @@
             { id: 'cai-dat', icon: 'ph-gear', label: 'Cài đặt' }
         ];
 
-        function escapeInlineJs(str) { return str ? String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, '\\n').replace(/\r/g, '\\r') : ''; }
-        function escapeHtmlAttr(str) { return str ? String(str).replace(/"/g, '&quot;') : ''; }
+        function escapeInlineJs(value) { return escapeHtmlText(JSON.stringify(String(value ?? '')).slice(1,-1).replace(/'/g, "\\'")); }
+        function escapeHtmlAttr(value) { return escapeHtmlText(value); }
         function escapeHtmlText(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -251,6 +251,18 @@
                 : `'${escapeInlineJs(String(value ?? ''))}'`;
         }
         
+        function safeImageUrl(value) {
+            const text=String(value||'').trim();
+            if(/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(text))return text.replace(/\s/g,'');
+            try {const url=new URL(text,location.href);if(!['https:','http:'].includes(url.protocol))return '';return escapeHtmlAttr(url.href.replace(/[<>"'()\\]/g,c=>'%'+c.charCodeAt(0).toString(16)));}catch(_){return '';}
+        }
+        function recordPointChange(student,delta,reason) {
+            delta=Number(delta);if(!Number.isFinite(delta)||delta===0)throw new Error('Số điểm không hợp lệ.');
+            const before=Number(student.stars||0);if(!Number.isFinite(before)||!Number.isFinite(Number(student.points||0)))throw new Error('Số dư điểm / sao không hợp lệ.');const after=Math.max(0,before+delta);
+            student.points=Number(student.points||0)+delta;student.stars=after;
+            const entry={id:'point_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2),date:new Date().toISOString(),points:delta,starsDelta:after-before,balanceEpoch:student.balanceEpoch||0,reason:String(reason||'')};
+            (student.history||(student.history=[])).push(entry);return entry;
+        }
         function generateUniqueCode() {
             let code, attempts = 0;
             const currentStudents = state.students || [];
@@ -354,12 +366,13 @@
 }
 
         function showToast(message, type = 'success') {
+            if(window.localSaveFailed&&type!=='error'){message='Chưa lưu được trên máy. Giữ trang này mở và xuất bản nháp hoặc lưu lên Sheet.';type='error';}
             // Recover authentication consistently, including older request handlers.
             if (isInvalidGoogleAdminKeyMessage(message)) clearGoogleAdminKey();
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
-            toast.innerHTML = type === 'success' ? `<i class="ph-fill ph-check-circle text-2xl drop-shadow"></i> <span>${message}</span>` : `<i class="ph-fill ph-warning-circle text-2xl drop-shadow"></i> <span>${message}</span>`;
+            toast.innerHTML = type === 'success' ? `<i class="ph-fill ph-check-circle text-2xl drop-shadow"></i> <span>${escapeHtmlText(message)}</span>` : `<i class="ph-fill ph-warning-circle text-2xl drop-shadow"></i> <span>${escapeHtmlText(message)}</span>`;
             container.appendChild(toast);
             setTimeout(() => { toast.classList.add('fadeOut'); setTimeout(() => toast.remove(), 300); }, 3000);
         }
@@ -367,7 +380,7 @@
         function getAvatarImg(url, name, classes = "w-10 h-10") {
             const safeName = name || 'User'; const seed = encodeURIComponent(safeName);
             const finalUrl = url || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=e0e7ff,fef08a,dcfce7,fee2e2`;
-            return `<img src="${finalUrl}" class="${classes} rounded-full object-cover flex-shrink-0 border-2 border-white shadow-sm">`;
+            return `<img src="${safeImageUrl(finalUrl)}" class="${escapeHtmlText(classes)} rounded-full object-cover flex-shrink-0 border-2 border-white shadow-sm">`;
         }
 
 window.switchSettingsTab = function(tab) {
@@ -422,20 +435,20 @@ function renderSidebar() {
 
     const menuHtml = activeMenuItems.map(item => {
         if (item.id === 'dong-ho') {
-            return `<button onclick="openTimerDrawer()" class="w-full flex items-center gap-4 px-6 py-3.5 mb-2 rounded-2xl transition-all duration-300 text-indigo-200 hover:bg-white/10 hover:text-white font-semibold group"><div class="p-2 rounded-xl bg-white/5 group-hover:bg-white/20 transition-colors"><i class="ph-fill ${item.icon} text-xl"></i></div><span class="text-sm tracking-wide">${item.label}</span></button>`;
+            return `<button onclick="openTimerDrawer()" class="w-full flex items-center gap-4 px-6 py-3.5 mb-2 rounded-2xl transition-all duration-300 text-indigo-200 hover:bg-white/10 hover:text-white font-semibold group"><div class="p-2 rounded-xl bg-white/5 group-hover:bg-white/20 transition-colors"><i class="ph-fill ${escapeHtmlText(item.icon)} text-xl"></i></div><span class="text-sm tracking-wide">${escapeHtmlText(item.label)}</span></button>`;
         }
         const isActive = state.currentTab === item.id || item.id === 'tram-dong-hanh' && state.currentTab === 'xep-hang';
         return `
-            <button onclick="switchTab('${item.id}')" class="w-full flex items-center gap-4 px-6 py-3.5 mb-2 rounded-2xl transition-all duration-300 group relative overflow-hidden ${isActive ? 'text-white' : 'text-indigo-200 hover:text-white hover:bg-white/5'}">
+            <button onclick="switchTab('${escapeInlineJs(item.id)}')" class="w-full flex items-center gap-4 px-6 py-3.5 mb-2 rounded-2xl transition-all duration-300 group relative overflow-hidden ${isActive ? 'text-white' : 'text-indigo-200 hover:text-white hover:bg-white/5'}">
                 ${isActive ? '<div class="absolute inset-0 bg-gradient-to-r from-blueAccent to-indigo-600 opacity-90"></div><div class="absolute inset-0 bg-[url(\'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wNykiLz48L3N2Zz4=\')]"></div>' : ''}
                 <div class="relative z-10 flex items-center gap-4 w-full">
-                    <div class="p-2 rounded-xl ${isActive ? 'bg-white/20 shadow-inner' : 'bg-transparent group-hover:bg-white/10'} transition-colors"><i class="ph-fill ${item.icon} text-xl"></i></div>
-                    <span class="text-sm tracking-wide font-bold">${item.label}</span>
+                    <div class="p-2 rounded-xl ${isActive ? 'bg-white/20 shadow-inner' : 'bg-transparent group-hover:bg-white/10'} transition-colors"><i class="ph-fill ${escapeHtmlText(item.icon)} text-xl"></i></div>
+                    <span class="text-sm tracking-wide font-bold">${escapeHtmlText(item.label)}</span>
                 </div>
             </button>`;
     }).join('');
     
-    const classAvatarContent = state.admin.classAvatarUrl ? `<img src="${state.admin.classAvatarUrl}" class="w-full h-full object-cover">` : `<i class="ph-fill ph-student text-white text-3xl"></i>`;
+    const classAvatarContent = state.admin.classAvatarUrl ? `<img src="${safeImageUrl(state.admin.classAvatarUrl)}" class="w-full h-full object-cover">` : `<i class="ph-fill ph-student text-white text-3xl"></i>`;
     
     return `
         <!-- Thêm 'hidden md:flex' để PC giữ nguyên, Điện thoại tự ẩn -->
@@ -449,7 +462,7 @@ function renderSidebar() {
                     </div>
                 </div>
                 <input type="file" id="class-avatar-upload" class="hidden" accept="image/*" onchange="handleClassAvatarUpload(event)">
-                <div class="font-extrabold text-white text-center text-[15px] tracking-wide uppercase leading-snug drop-shadow-md z-10 px-2">${state.admin.className || "LỚP HỌC"}</div>
+                <div class="font-extrabold text-white text-center text-[15px] tracking-wide uppercase leading-snug drop-shadow-md z-10 px-2">${escapeHtmlText(state.admin.className || "LỚP HỌC")}</div>
                 <div class="text-[10px] text-indigo-300/80 uppercase tracking-widest mt-1.5 z-10 font-bold">Hệ thống quản lý</div>
             </div>
             <div id="sidebar-menu" class="flex-1 overflow-y-auto px-4 custom-scrollbar pb-6">${menuHtml}</div>
@@ -493,8 +506,8 @@ function renderHeader() {
                 ${syncStatus}
                 <div class="flex items-center gap-3 bg-white border border-slate-200 py-1.5 px-2 sm:px-4 rounded-2xl shadow-sm transition-all">
                     <div class="text-right hidden sm:block ${(!state.auth || state.auth.role === 'gvcn') ? 'cursor-pointer group hover:text-blueAccent' : ''}" ${(!state.auth || state.auth.role === 'gvcn') ? 'onclick="openEditAdminModal()"' : ''}>
-                        <div class="text-xs font-bold text-slate-800 transition-colors">${roleName}</div>
-                        <div class="text-[9px] text-slate-500 uppercase tracking-widest font-semibold">${roleDesc}</div>
+                        <div class="text-xs font-bold text-slate-800 transition-colors">${escapeHtmlText(roleName)}</div>
+                        <div class="text-[9px] text-slate-500 uppercase tracking-widest font-semibold">${escapeHtmlText(roleDesc)}</div>
                     </div>
                     <div class="relative flex-shrink-0 ${(!state.auth || state.auth.role === 'gvcn') ? 'cursor-pointer group hover:scale-105 transition-transform' : ''}" ${(!state.auth || state.auth.role === 'gvcn') ? 'onclick="openEditAdminModal()"' : ''}>
                         ${getAvatarImg(state.admin.avatarUrl, state.admin.name, "w-9 h-9")}
@@ -557,7 +570,7 @@ window.closeModal = function(id) {
                     ${renderHeader()}
                     
                     <!-- pd-28 md:pb-8: Chừa khoảng trống dưới cùng trên điện thoại để menu không che chữ -->
-                    <main class="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar relative print:p-0 print:overflow-visible pb-28 md:pb-8" id="main-content" data-tab="${state.currentTab}">
+                    <main class="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar relative print:p-0 print:overflow-visible pb-28 md:pb-8" id="main-content" data-tab="${escapeHtmlText(state.currentTab)}">
                         ${contentHtml}
                     </main>
                     
@@ -639,8 +652,8 @@ window.closeModal = function(id) {
                 return `
                     <div class="bg-white/10 hover:bg-white/20 p-4 rounded-2xl border border-white/5 transition-all cursor-pointer group" onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(s.id)})">
                         <div class="flex items-center gap-3 mb-2">
-                            <span class="text-2xl">${medals[index]}</span>
-                            <div class="font-bold text-white text-base">${s.name}</div>
+                            <span class="text-2xl">${escapeHtmlText(medals[index])}</span>
+                            <div class="font-bold text-white text-base">${escapeHtmlText(s.name)}</div>
                             <div class="text-white ml-auto font-black flex items-center gap-1">— ${s.points || 0} điểm</div>
                         </div>
                         <div class="pl-10 text-xs text-emerald-300 font-bold flex items-center gap-1">
@@ -660,10 +673,10 @@ window.closeModal = function(id) {
                 const stars = '⭐'.repeat(Math.min(3, Math.ceil(s.weekProg / 5))) || '⭐';
                 return `
                     <div class="bg-white/10 hover:bg-white/20 p-4 rounded-2xl border border-white/5 transition-all cursor-pointer group mb-3" onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(s.id)})">
-                        <div class="font-bold text-white text-base mb-0.5">${s.name}</div>
-                        <div class="text-[11px] text-blue-200 uppercase font-bold tracking-wider mb-2 opacity-80">${s.group}</div>
+                        <div class="font-bold text-white text-base mb-0.5">${escapeHtmlText(s.name)}</div>
+                        <div class="text-[11px] text-blue-200 uppercase font-bold tracking-wider mb-2 opacity-80">${escapeHtmlText(s.group)}</div>
                         <div class="flex items-center gap-2 text-sm text-yellow-300 font-bold">
-                            ${stars} <span class="text-white ml-1">+${s.weekProg} điểm tuần này <i class="ph-bold ph-arrow-up text-emerald-300"></i></span>
+                            ${stars} <span class="text-white ml-1">+${escapeHtmlText(s.weekProg)} điểm tuần này <i class="ph-bold ph-arrow-up text-emerald-300"></i></span>
                         </div>
                     </div>
                 `;
@@ -677,13 +690,13 @@ window.closeModal = function(id) {
                     const colorClass = t.level === 'red' ? 'red-500' : t.level === 'yellow' ? 'amber-500' : 'emerald-500';
                     return `
                     <div class="flex items-start gap-3 mb-4 group relative bg-slate-50/50 p-4 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors">
-                        <div class="w-3 h-3 rounded-full mt-1.5 bg-${colorClass} shadow-sm flex-shrink-0"></div>
+                        <div class="w-3 h-3 rounded-full mt-1.5 bg-${escapeHtmlText(colorClass)} shadow-sm flex-shrink-0"></div>
                         <div class="flex-1 min-w-0">
-                            <div class="font-bold text-slate-800 text-sm truncate">${t.content}</div>
-                            <div class="text-xs text-slate-500 mb-1.5 mt-1">${t.person} ${t.deadline ? '— Hạn: <span class="font-bold text-slate-700">' + t.deadline.split('-').reverse().join('/') + '</span>' : ''}</div>
-                            ${t.note ? `<div class="text-[11px] text-slate-400 italic bg-white p-2 rounded-lg border border-slate-100 shadow-sm">${t.note}</div>` : ''}
+                            <div class="font-bold text-slate-800 text-sm truncate">${escapeHtmlText(t.content)}</div>
+                            <div class="text-xs text-slate-500 mb-1.5 mt-1">${escapeHtmlText(t.person)} ${t.deadline ? '— Hạn: <span class="font-bold text-slate-700">' + t.deadline.split('-').reverse().join('/') + '</span>' : ''}</div>
+                            ${t.note ? `<div class="text-[11px] text-slate-400 italic bg-white p-2 rounded-lg border border-slate-100 shadow-sm">${escapeHtmlText(t.note)}</div>` : ''}
                         </div>
-                        <button onclick="deleteTask(${t.id})" class="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity p-1.5 bg-white rounded-full shadow-sm" title="Tíc hoàn thành"><i class="ph-bold ph-check text-lg"></i></button>
+                        <button onclick="deleteTask(${toInlineJsValue(t.id)})" class="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity p-1.5 bg-white rounded-full shadow-sm" title="Tíc hoàn thành"><i class="ph-bold ph-check text-lg"></i></button>
                     </div>
                     `;
                 }).join('');
@@ -694,12 +707,12 @@ window.closeModal = function(id) {
                 ? '<div class="text-center py-12 text-slate-400 italic font-medium">✨ Hãy tạo cột mốc đầu tiên cho hành trình của lớp!</div>'
                 : journeys.map(j => `
                     <div class="relative pl-12 mb-6 group">
-                        <div class="absolute left-0 top-0 w-8 h-8 bg-emerald-50 rounded-full border-2 border-emerald-100 flex items-center justify-center text-sm z-10 shadow-sm">${j.icon}</div>
+                        <div class="absolute left-0 top-0 w-8 h-8 bg-emerald-50 rounded-full border-2 border-emerald-100 flex items-center justify-center text-sm z-10 shadow-sm">${escapeHtmlText(j.icon)}</div>
                         <div class="absolute left-4 top-8 bottom-[-24px] w-px bg-slate-200 group-last:bg-transparent"></div>
                         <div class="font-bold text-slate-800 mb-0.5 text-sm">${j.date ? j.date.split('-').reverse().join('/') : ''}</div>
-                        <div class="text-sm text-emerald-700 font-bold mb-1.5">${j.title}</div>
-                        ${j.content ? `<div class="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 mt-1.5 shadow-inner leading-relaxed">${j.content}</div>` : ''}
-                        <button onclick="deleteJourney(${j.id})" class="absolute right-0 top-0 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity p-1" title="Xóa cột mốc"><i class="ph-fill ph-trash text-lg"></i></button>
+                        <div class="text-sm text-emerald-700 font-bold mb-1.5">${escapeHtmlText(j.title)}</div>
+                        ${j.content ? `<div class="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 mt-1.5 shadow-inner leading-relaxed">${escapeHtmlText(j.content)}</div>` : ''}
+                        <button onclick="deleteJourney(${toInlineJsValue(j.id)})" class="absolute right-0 top-0 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity p-1" title="Xóa cột mốc"><i class="ph-fill ph-trash text-lg"></i></button>
                     </div>
                 `).join('');
                 
@@ -731,10 +744,10 @@ window.closeModal = function(id) {
                     
                     <!-- 1. Banner & Lớp thông tin nhỏ -->
                     <div>
-                        <div class="w-full h-40 md:h-56 ${state.theme.bannerUrl ? 'bg-cover bg-center' : `bg-gradient-to-br ${state.theme.bannerColorClass}`} rounded-[2rem] shadow-sm relative flex flex-col items-center justify-center group overflow-hidden" ${state.theme.bannerUrl ? `style="background-image: url('${state.theme.bannerUrl}');"` : ''}>
+                        <div class="w-full h-40 md:h-56 ${state.theme.bannerUrl ? 'bg-cover bg-center' : `bg-gradient-to-br ${state.theme.bannerColorClass}`} rounded-[2rem] shadow-sm relative flex flex-col items-center justify-center group overflow-hidden" ${state.theme.bannerUrl ? `style="background-image: url('${safeImageUrl(state.theme.bannerUrl)}');"` : ''}>
                             ${!state.theme.bannerUrl ? `
-                                <div class="text-white/80 text-[11px] font-bold uppercase tracking-[0.25em] mb-3 z-10">${state.theme.month}</div>
-                                <h1 class="text-white text-3xl md:text-5xl font-black uppercase tracking-tight text-center px-4 z-10 drop-shadow-md">${state.theme.title}</h1>
+                                <div class="text-white/80 text-[11px] font-bold uppercase tracking-[0.25em] mb-3 z-10">${escapeHtmlText(state.theme.month)}</div>
+                                <h1 class="text-white text-3xl md:text-5xl font-black uppercase tracking-tight text-center px-4 z-10 drop-shadow-md">${escapeHtmlText(state.theme.title)}</h1>
                             ` : ''}
                             <button onclick="openEditThemeModal()" class="absolute top-4 right-4 bg-black/40 text-white rounded-full p-2.5 opacity-0 group-hover:opacity-100 transition-all z-20 hover:bg-black/60"><i class="ph-fill ph-pencil-simple text-base"></i></button>
                         </div>
@@ -772,7 +785,7 @@ window.closeModal = function(id) {
                             </div>
                             <div class="bg-white rounded-[1.5rem] p-5 shadow-sm border border-slate-100 flex flex-col">
                                 <div class="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-2">${disciplineIcon} NỀN NẾP</div>
-                                <div class="text-2xl font-black ${disciplineColor} mt-auto">${disciplineStatus}</div>
+                                <div class="text-2xl font-black ${escapeHtmlText(disciplineColor)} mt-auto">${disciplineStatus}</div>
                             </div>
                             <div class="bg-white rounded-[1.5rem] p-5 shadow-sm border border-slate-100 flex flex-col">
                                 <div class="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-2">⭐ ĐIỂM TỐT</div>
@@ -789,7 +802,7 @@ window.closeModal = function(id) {
                         <!-- 4. & 5. Bảng Vàng & Tiến Bộ Nổi Bật -->
                         <div class="xl:col-span-8 flex flex-col gap-6">
                             <div class="bg-[#1e1b4b] rounded-[2rem] p-6 md:p-8 shadow-sm flex flex-col h-full">
-                                <h3 class="text-white font-black text-lg md:text-xl flex items-center gap-2 uppercase tracking-wide mb-6">🏆 BẢNG VÀNG ${state.admin.className || 'DANH DỰ'}</h3>
+                                <h3 class="text-white font-black text-lg md:text-xl flex items-center gap-2 uppercase tracking-wide mb-6">🏆 BẢNG VÀNG ${escapeHtmlText(state.admin.className || 'DANH DỰ')}</h3>
                                 <div class="flex-1 flex flex-col gap-3">
                                     ${top3StudentsHtml || '<div class="text-white/40 text-sm italic w-full text-center py-10">Chưa có dữ liệu thi đua</div>'}
                                 </div>
@@ -819,7 +832,7 @@ window.closeModal = function(id) {
                         <!-- KHỐI 6: Hành Trình Lớp -->
                         <div class="xl:col-span-6 bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100 flex flex-col relative min-h-[350px]">
                             <div class="flex justify-between items-center mb-6">
-                                <h3 class="font-black text-lg md:text-xl text-slate-800 flex items-center gap-2">🚂 HÀNH TRÌNH LỚP ${state.admin.className || '12A1'} TRƯỞNG THÀNH</h3>
+                                <h3 class="font-black text-lg md:text-xl text-slate-800 flex items-center gap-2">🚂 HÀNH TRÌNH LỚP ${escapeHtmlText(state.admin.className || '12A1')} TRƯỞNG THÀNH</h3>
                                 <button onclick="openJourneyModal()" class="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-xl hover:bg-emerald-100 transition-colors flex items-center gap-1.5 shadow-sm border border-emerald-100">
                                     <i class="ph-bold ph-plus"></i> Thêm cột mốc
                                 </button>
@@ -874,17 +887,17 @@ window.closeModal = function(id) {
 
                 // --- TẠO DANH SÁCH ĐIỂM CỘNG NHANH TỪ CÀI ĐẶT ---
                 const positiveList = state.criteria.positive.map(c => `
-                    <button onclick="executeQuickPoint(${toInlineJsValue(s.id)}, ${c.points}, '${escapeInlineJs(c.reason)}', '${escapeInlineJs(c.category)}', 'add')" class="w-full text-left px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 rounded-lg flex justify-between items-center gap-2 transition-colors">
-                        <span class="truncate">${c.reason}</span>
-                        <span class="flex-shrink-0 bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">+${c.points}</span>
+                    <button onclick="executeQuickPoint(${toInlineJsValue(s.id)}, ${toInlineJsValue(c.points)}, '${escapeInlineJs(c.reason)}', '${escapeInlineJs(c.category)}', 'add')" class="w-full text-left px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 rounded-lg flex justify-between items-center gap-2 transition-colors">
+                        <span class="truncate">${escapeHtmlText(c.reason)}</span>
+                        <span class="flex-shrink-0 bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">+${escapeHtmlText(c.points)}</span>
                     </button>
                 `).join('');
 
                 // --- TẠO DANH SÁCH ĐIỂM TRỪ NHANH TỪ CÀI ĐẶT ---
                 const negativeList = state.criteria.negative.map(c => `
-                    <button onclick="executeQuickPoint(${toInlineJsValue(s.id)}, ${c.points}, '${escapeInlineJs(c.reason)}', '${escapeInlineJs(c.category)}', 'subtract')" class="w-full text-left px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg flex justify-between items-center gap-2 transition-colors">
-                        <span class="truncate">${c.reason}</span>
-                        <span class="flex-shrink-0 bg-red-100 text-red-700 px-1.5 py-0.5 rounded">-${c.points}</span>
+                    <button onclick="executeQuickPoint(${toInlineJsValue(s.id)}, ${toInlineJsValue(c.points)}, '${escapeInlineJs(c.reason)}', '${escapeInlineJs(c.category)}', 'subtract')" class="w-full text-left px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg flex justify-between items-center gap-2 transition-colors">
+                        <span class="truncate">${escapeHtmlText(c.reason)}</span>
+                        <span class="flex-shrink-0 bg-red-100 text-red-700 px-1.5 py-0.5 rounded">-${escapeHtmlText(c.points)}</span>
                     </button>
                 `).join('');
 
@@ -894,7 +907,7 @@ window.closeModal = function(id) {
                     <!-- Nút Tùy chọn gốc (Menu 3 chấm) -->
                     <div class="absolute top-4 right-4 z-20">
                         <button onclick="toggleStudentMenu(event, ${toInlineJsValue(s.id)})" class="text-slate-300 hover:text-slate-600 p-1 rounded-full focus:outline-none transition-colors"><i class="ph-bold ph-dots-three-vertical text-xl"></i></button>
-                        <div id="student-menu-${s.id}" class="student-dropdown hidden absolute right-0 mt-1 w-40 bg-white rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.1)] border border-slate-100 overflow-hidden z-30 p-2 animate-fade-in">
+                        <div id="student-menu-${escapeHtmlText(s.id)}" class="student-dropdown hidden absolute right-0 mt-1 w-40 bg-white rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.1)] border border-slate-100 overflow-hidden z-30 p-2 animate-fade-in">
                             <button onclick="openStudentHistoryModal(${toInlineJsValue(s.id)})" class="w-full text-left px-3 py-2.5 text-sm text-emerald-600 hover:bg-slate-50 rounded-lg font-bold flex items-center gap-2.5"><i class="ph-bold ph-clock-counter-clockwise text-lg"></i> Lịch sử</button>
                             <button onclick="deleteStudent(${toInlineJsValue(s.id)})" class="w-full text-left px-3 py-2.5 text-sm text-red-600 hover:bg-slate-50 rounded-lg font-bold flex items-center gap-2.5"><i class="ph-fill ph-trash text-lg"></i> Xóa</button>
                         </div>
@@ -904,10 +917,10 @@ window.closeModal = function(id) {
                     ${getAvatarImg(s.avatarUrl, s.name, "w-24 h-24 mb-4 mt-2 ring-4 ring-slate-50 shadow-md")}
                     
                     <!-- Thông tin cơ bản (Tên, Tổ, Chức vụ) -->
-                    <div class="font-black text-slate-800 text-xl mb-2 truncate w-full text-center">${s.name}</div>
+                    <div class="font-black text-slate-800 text-xl mb-2 truncate w-full text-center">${escapeHtmlText(s.name)}</div>
                     <div class="flex items-center justify-center gap-2 mb-4">
                         <span class="text-[10px] font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-md uppercase border border-slate-200">${s.group || 'Chưa nhóm'}</span>
-                        <span class="text-[10px] font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-md border border-blue-100">${s.role || 'Thành viên'}</span>
+                        <span class="text-[10px] font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-md border border-blue-100">${escapeHtmlText(s.role || 'Thành viên')}</span>
                     </div>
 
                     <!-- Điểm số nổi bật -->
@@ -917,22 +930,22 @@ window.closeModal = function(id) {
                     <!-- Dải Nút Cộng/Trừ nhanh -->
                     <div class="flex items-center justify-center gap-4 w-full relative mb-6 px-4">
                         <div class="relative w-full">
-                            <button onclick="toggleQuickMenu(event, 'quick-minus-${s.id}')" title="Trừ điểm" class="w-full h-10 rounded-xl bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 hover:text-red-600 transition-colors border border-red-100 font-black text-lg shadow-sm">
+                            <button onclick="toggleQuickMenu(event, 'quick-minus-${escapeInlineJs(s.id)}')" title="Trừ điểm" class="w-full h-10 rounded-xl bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 hover:text-red-600 transition-colors border border-red-100 font-black text-lg shadow-sm">
                                 <i class="ph-bold ph-minus"></i>
                             </button>
                             <!-- Menu Trừ điểm -->
-                            <div id="quick-minus-${s.id}" class="student-dropdown hidden absolute bottom-[calc(100%+8px)] left-0 w-60 bg-white border border-red-100 shadow-[0_10px_40px_rgba(239,68,68,0.15)] rounded-2xl z-50 p-2 max-h-56 overflow-y-auto custom-scrollbar animate-slide-up">
+                            <div id="quick-minus-${escapeHtmlText(s.id)}" class="student-dropdown hidden absolute bottom-[calc(100%+8px)] left-0 w-60 bg-white border border-red-100 shadow-[0_10px_40px_rgba(239,68,68,0.15)] rounded-2xl z-50 p-2 max-h-56 overflow-y-auto custom-scrollbar animate-slide-up">
                                 <div class="text-[10px] text-red-400 font-bold uppercase tracking-widest px-2 pb-2 mb-2 border-b border-red-50 text-left">Chọn lý do trừ điểm:</div>
                                 ${negativeList || '<div class="text-xs text-slate-400 italic p-2 text-center">Chưa có mẫu</div>'}
                             </div>
                         </div>
 
                         <div class="relative w-full">
-                            <button onclick="toggleQuickMenu(event, 'quick-plus-${s.id}')" title="Cộng điểm" class="w-full h-10 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center hover:bg-emerald-100 hover:text-emerald-600 transition-colors border border-emerald-100 font-black text-lg shadow-sm">
+                            <button onclick="toggleQuickMenu(event, 'quick-plus-${escapeInlineJs(s.id)}')" title="Cộng điểm" class="w-full h-10 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center hover:bg-emerald-100 hover:text-emerald-600 transition-colors border border-emerald-100 font-black text-lg shadow-sm">
                                 <i class="ph-bold ph-plus"></i>
                             </button>
                             <!-- Menu Cộng điểm -->
-                            <div id="quick-plus-${s.id}" class="student-dropdown hidden absolute bottom-[calc(100%+8px)] right-0 w-60 bg-white border border-emerald-100 shadow-[0_10px_40px_rgba(16,185,129,0.15)] rounded-2xl z-50 p-2 max-h-56 overflow-y-auto custom-scrollbar animate-slide-up">
+                            <div id="quick-plus-${escapeHtmlText(s.id)}" class="student-dropdown hidden absolute bottom-[calc(100%+8px)] right-0 w-60 bg-white border border-emerald-100 shadow-[0_10px_40px_rgba(16,185,129,0.15)] rounded-2xl z-50 p-2 max-h-56 overflow-y-auto custom-scrollbar animate-slide-up">
                                 <div class="text-[10px] text-emerald-500 font-bold uppercase tracking-widest px-2 pb-2 mb-2 border-b border-emerald-50 text-left">Chọn lý do cộng điểm:</div>
                                 ${positiveList || '<div class="text-xs text-slate-400 italic p-2 text-center">Chưa có mẫu</div>'}
                             </div>
@@ -953,7 +966,7 @@ window.closeModal = function(id) {
                       <div>
                             <h2 class="text-2xl md:text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
                                 Quản lí Học sinh 
-                                <span class="bg-blue-100 text-blue-700 text-[13px] px-3 py-1 rounded-full border border-blue-200 shadow-inner font-bold tracking-wide">Sĩ số: ${state.students.length}</span>
+                                <span class="bg-blue-100 text-blue-700 text-[13px] px-3 py-1 rounded-full border border-blue-200 shadow-inner font-bold tracking-wide">Sĩ số: ${escapeHtmlText(state.students.length)}</span>
                             </h2>
                             <p class="text-slate-500 text-sm font-medium mt-1">Thông tin chi tiết, vai trò và mục tiêu phấn đấu của các em</p>
                         </div>
@@ -1094,19 +1107,19 @@ function renderWeeklyComments(){
  return `<section class="weekly-comments bg-white rounded-3xl border border-slate-200 p-5 md:p-7 space-y-5">
  <div><h2 class="font-black text-2xl">Nhận xét học sinh theo tuần</h2><p class="text-slate-500 mt-1">Nhập trực tiếp hoặc dán một cột nhận xét từ Excel/Google Sheet.</p></div>
  <div class="flex flex-wrap gap-3">
-  <button ${disabled} onclick="loadWeeklyComments()" class="${button} text-emerald-700">Tải nhận xét mới nhất</button>
-  <button ${disabled} onclick="openConnectedGoogleSheet()" class="${button} text-blue-700">Mở Google Sheet</button>
-  <button ${disabled} onclick="saveWeeklyCommentsUI()" class="${button} bg-indigo-600 text-white">${c.busy?"Đang lưu…":"Lưu nhận xét"}</button>
+  <button ${disabled} onclick="loadWeeklyComments()" class="${escapeHtmlText(button)} text-emerald-700">Tải nhận xét mới nhất</button>
+  <button ${disabled} onclick="openConnectedGoogleSheet()" class="${escapeHtmlText(button)} text-blue-700">Mở Google Sheet</button>
+  <button ${disabled} onclick="saveWeeklyCommentsUI()" class="${escapeHtmlText(button)} bg-indigo-600 text-white">${c.busy?"Đang lưu…":"Lưu nhận xét"}</button>
  </div>
  ${!c.loaded?'<p class="text-slate-500">'+(c.busy?"Đang tải nhận xét…":"Bấm Tải nhận xét mới nhất để lấy danh sách học sinh.")+'</p>':`
  <fieldset ${disabled} class="space-y-5">
   <div class="grid sm:grid-cols-[220px_1fr] gap-4 items-end">
-   <label class="font-bold">Tuần<input aria-label="Số tuần nhận xét" type="number" min="1" max="99" value="${c.weekNumber}" onchange="changeWeeklyCommentWeek(this.value)" class="block mt-2 w-full border rounded-xl p-3"></label>
-   <div><p id="weekly-comment-count" class="font-bold text-indigo-700">${filled}/${c.students.length} học sinh có nhận xét</p><p class="text-sm text-slate-500 mt-1">Dán cả một cột vào ô đầu tiên để điền nhanh theo đúng thứ tự danh sách.</p></div>
+   <label class="font-bold">Tuần<input aria-label="Số tuần nhận xét" type="number" min="1" max="99" value="${escapeHtmlText(c.weekNumber)}" onchange="changeWeeklyCommentWeek(this.value)" class="block mt-2 w-full border rounded-xl p-3"></label>
+   <div><p id="weekly-comment-count" class="font-bold text-indigo-700">${filled}/${escapeHtmlText(c.students.length)} học sinh có nhận xét</p><p class="text-sm text-slate-500 mt-1">Dán cả một cột vào ô đầu tiên để điền nhanh theo đúng thứ tự danh sách.</p></div>
   </div>
   <div class="weekly-comment-table-wrap overflow-x-auto border rounded-2xl"><table class="weekly-comment-table w-full min-w-[760px] text-sm">
-   <thead class="bg-slate-50"><tr><th class="p-3 text-left w-16">STT</th><th class="p-3 text-left w-64">Học sinh</th><th class="p-3 text-left">Nhận xét tuần ${c.weekNumber}</th></tr></thead>
-   <tbody>${c.students.map((s,i)=>`<tr class="border-t border-slate-100"><td class="p-3 text-slate-500">${i+1}</td><td class="p-3"><div class="font-bold">${esc(s.name)}</div><div class="text-xs text-slate-500">${esc(s.studentCode)}</div></td><td class="weekly-comment-input p-3"><textarea aria-label="Nhận xét ${esc(s.name)}" maxlength="1000" rows="2" oninput="editWeeklyComment(${i},this.value)" onpaste="pasteWeeklyComments(event,${i})" class="w-full border rounded-xl p-3 resize-y" placeholder="Nhập nhận xét cho học sinh">${esc(c.draft[s.studentCode]||"")}</textarea></td></tr>`).join("")||'<tr><td colspan="3" class="p-5 text-slate-500">Chưa có học sinh trong Sheet.</td></tr>'}</tbody>
+   <thead class="bg-slate-50"><tr><th class="p-3 text-left w-16">STT</th><th class="p-3 text-left w-64">Học sinh</th><th class="p-3 text-left">Nhận xét tuần ${escapeHtmlText(c.weekNumber)}</th></tr></thead>
+   <tbody>${c.students.map((s,i)=>`<tr class="border-t border-slate-100"><td class="p-3 text-slate-500">${i+1}</td><td class="p-3"><div class="font-bold">${esc(s.name)}</div><div class="text-xs text-slate-500">${esc(s.studentCode)}</div></td><td class="weekly-comment-input p-3"><textarea aria-label="Nhận xét ${esc(s.name)}" maxlength="1000" rows="2" oninput="editWeeklyComment(${toInlineJsValue(i)},this.value)" onpaste="pasteWeeklyComments(event,${toInlineJsValue(i)})" class="w-full border rounded-xl p-3 resize-y" placeholder="Nhập nhận xét cho học sinh">${esc(c.draft[s.studentCode]||"")}</textarea></td></tr>`).join("")||'<tr><td colspan="3" class="p-5 text-slate-500">Chưa có học sinh trong Sheet.</td></tr>'}</tbody>
   </table></div>
  </fieldset>`}</section>`;
 }
@@ -1203,23 +1216,23 @@ function renderHomework(){
  <h2 class="font-black text-2xl">Bài tập về nhà</h2>
  <p><a href="btvn.html" target="_blank" rel="noopener noreferrer" class="text-blue-700 font-bold underline">Xem bảng giao BTVN của lớp</a> · <a href="btvn.html?admin=1" target="_blank" rel="noopener noreferrer" class="text-blue-700 font-bold underline">Quản lý người đăng BTVN</a></p>
  <div class="flex flex-wrap gap-3">
- <button ${disabled} onclick="loadHomework()" class="${button} text-emerald-700">Tải BTVN mới nhất</button>
- <button ${disabled} onclick="openConnectedGoogleSheet()" class="${button} text-blue-700">Mở Google Sheet</button></div>
+ <button ${disabled} onclick="loadHomework()" class="${escapeHtmlText(button)} text-emerald-700">Tải BTVN mới nhất</button>
+ <button ${disabled} onclick="openConnectedGoogleSheet()" class="${escapeHtmlText(button)} text-blue-700">Mở Google Sheet</button></div>
  ${!h.loaded?'<p class="text-slate-500">'+(h.busy?"Đang tải BTVN…":"Bấm Tải BTVN mới nhất để lấy danh sách học sinh.")+'</p>':`
  <fieldset ${disabled} class="space-y-5">
  <div class="grid sm:grid-cols-2 gap-4">
- <label class="font-bold">Môn học<select aria-label="Môn BTVN" onchange="changeHomeworkFilter('subjectCode',this.value)" class="block mt-2 w-full border rounded-xl p-3">${Object.entries(subjects).map(([k,v])=>`<option value="${k}" ${k===h.subjectCode?"selected":""}>${v}</option>`).join("")}</select></label>
+ <label class="font-bold">Môn học<select aria-label="Môn BTVN" onchange="changeHomeworkFilter('subjectCode',this.value)" class="block mt-2 w-full border rounded-xl p-3">${Object.entries(subjects).map(([k,v])=>`<option value="${escapeHtmlText(k)}" ${k===h.subjectCode?"selected":""}>${v}</option>`).join("")}</select></label>
  <label class="font-bold">Ngày kiểm tra BTVN<input aria-label="Ngày kiểm tra BTVN" type="date" value="${esc(h.date)}" onchange="changeHomeworkFilter('date',this.value)" class="block mt-2 w-full border rounded-xl p-3"></label></div>
  <label class="block font-bold">Bài tập (không bắt buộc)<input maxlength="200" value="${esc(h.title)}" oninput="homeworkUI().title=this.value;homeworkUI().dirty=true" class="block mt-2 w-full border rounded-xl p-3" placeholder="Ví dụ: Bài 1–5 trang 20"></label>
- <div class="flex flex-wrap gap-3"><button onclick="markHomeworkComplete()" class="${button} bg-emerald-50 text-emerald-700">Cả lớp hoàn thành</button><button onclick="saveHomeworkUI()" class="${button} bg-indigo-600 text-white">${h.busy?"Đang lưu…":"Lưu BTVN"}</button></div>
+ <div class="flex flex-wrap gap-3"><button onclick="markHomeworkComplete()" class="${escapeHtmlText(button)} bg-emerald-50 text-emerald-700">Cả lớp hoàn thành</button><button onclick="saveHomeworkUI()" class="${escapeHtmlText(button)} bg-indigo-600 text-white">${h.busy?"Đang lưu…":"Lưu BTVN"}</button></div>
  <p class="text-sm text-slate-500">Chọn cả lớp hoàn thành, sau đó chọn riêng các em chưa làm hoặc làm chưa đủ. “Chưa ghi nhận” không tính là hoàn thành. Mỗi môn và ngày lưu một lần kiểm tra.</p>
  <div class="space-y-4">${h.students.map((s,i)=>{
  const d=h.draft[s.studentCode]||{status:"",note:""};
  const previous=h.records.find(r=>r.date===h.date&&r.subjectCode===h.subjectCode&&r.studentCode===s.studentCode);
  const canSupplement=previous&&["missing","partial","supplemented"].includes(previous.status);
  return `<div class="border rounded-2xl p-4"><div class="font-bold mb-3">${esc(s.name)} <span class="font-normal text-sm text-slate-500">${esc(s.studentCode)}</span></div>
- <div class="flex flex-wrap gap-3">${[["","Chưa ghi nhận"],...Object.entries(homeworkStatusLabels())].map(([value,label])=>`<label class="border rounded-xl px-3 py-2 text-sm ${d.status===value?"bg-indigo-50 border-indigo-400":"bg-white"}"><input type="radio" name="hw-status-${i}" value="${value}" ${d.status===value?"checked":""} ${(!value&&previous)||(value==="supplemented"&&!canSupplement)?"disabled":""} onchange="editHomework(${i},'status',this.value)"> ${label}</label>`).join("")}</div>
- <input aria-label="Ghi chú BTVN ${esc(s.name)}" maxlength="500" value="${esc(d.note)}" oninput="editHomework(${i},'note',this.value)" class="mt-3 w-full border rounded-xl p-3 text-sm" placeholder="Ghi chú nếu có"></div>`;
+ <div class="flex flex-wrap gap-3">${[["","Chưa ghi nhận"],...Object.entries(homeworkStatusLabels())].map(([value,label])=>`<label class="border rounded-xl px-3 py-2 text-sm ${d.status===value?"bg-indigo-50 border-indigo-400":"bg-white"}"><input type="radio" name="hw-status-${escapeHtmlText(i)}" value="${escapeHtmlText(value)}" ${d.status===value?"checked":""} ${(!value&&previous)||(value==="supplemented"&&!canSupplement)?"disabled":""} onchange="editHomework(${toInlineJsValue(i)},'status',this.value)"> ${label}</label>`).join("")}</div>
+ <input aria-label="Ghi chú BTVN ${esc(s.name)}" maxlength="500" value="${esc(d.note)}" oninput="editHomework(${toInlineJsValue(i)},'note',this.value)" class="mt-3 w-full border rounded-xl p-3 text-sm" placeholder="Ghi chú nếu có"></div>`;
  }).join("")||'<p>Chưa có học sinh trong Sheet.</p>'}</div></fieldset>`}</section>`;
 }
 
@@ -1488,7 +1501,7 @@ window.openNewScoreTestModal = function openNewScoreTestModal() {
                         </select>
                     </label>
                     <label class="block"><span class="text-sm font-bold text-slate-600">Tên bài kiểm tra</span><input id="new-score-title" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold" placeholder="Ví dụ: Kiểm tra chương 1"></label>
-                    <label class="block"><span class="text-sm font-bold text-slate-600">Ngày kiểm tra</span><input id="new-score-date" type="date" value="${dateValue}" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold"></label>
+                    <label class="block"><span class="text-sm font-bold text-slate-600">Ngày kiểm tra</span><input id="new-score-date" type="date" value="${escapeHtmlText(dateValue)}" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 font-bold"></label>
                 </div>
                 <div class="p-6 pt-0 flex justify-end gap-3">
                     <button onclick="closeModal('new-score-test-modal')" class="px-5 py-3 rounded-xl border border-slate-200 font-bold text-slate-600">Hủy</button>
@@ -1684,7 +1697,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                             <select onchange="updatePointsForm('selectedTargetId', this.value)" class="w-full px-5 py-3.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-100 transition-all appearance-none cursor-pointer shadow-sm">
                                 <option value="">-- Chọn học sinh --</option>
                                 ${[...state.students].sort((a,b) => a.name.localeCompare(b.name)).map(s => 
-                                    `<option value="${s.id}" ${pf.selectedTargetId == s.id ? 'selected' : ''}>${s.name} (${s.group} - ${s.points}đ)</option>`
+                                    `<option value="${escapeHtmlText(s.id)}" ${pf.selectedTargetId == s.id ? 'selected' : ''}>${escapeHtmlText(s.name)} (${escapeHtmlText(s.group)} - ${escapeHtmlText(s.points)}đ)</option>`
                                 ).join('')}
                             </select>
                             <i class="ph-bold ph-caret-down absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xl"></i>
@@ -1699,7 +1712,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                             <select onchange="updatePointsForm('selectedTargetId', this.value)" class="w-full px-5 py-3.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-100 transition-all appearance-none cursor-pointer shadow-sm">
                                 <option value="">-- Chọn nhóm/tổ --</option>
                                 ${state.groups.map(g => 
-                                    `<option value="${g.name}" ${pf.selectedTargetId === g.name ? 'selected' : ''}>${g.name}</option>`
+                                    `<option value="${escapeHtmlText(g.name)}" ${pf.selectedTargetId === g.name ? 'selected' : ''}>${escapeHtmlText(g.name)}</option>`
                                 ).join('')}
                             </select>
                             <i class="ph-bold ph-caret-down absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-xl"></i>
@@ -1712,7 +1725,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         <div class="p-2 bg-purple-200 text-purple-700 rounded-lg"><i class="ph-fill ph-users-three text-xl"></i></div>
                         <div>
                             <div class="font-bold text-purple-800 text-sm">Áp dụng cho Cả Lớp</div>
-                            <div class="text-[11px] text-purple-600 mt-0.5">Điểm sẽ được cập nhật cho tất cả ${state.students.length} học sinh.</div>
+                            <div class="text-[11px] text-purple-600 mt-0.5">Điểm sẽ được cập nhật cho tất cả ${escapeHtmlText(state.students.length)} học sinh.</div>
                         </div>
                     </div>
                 `;
@@ -1727,11 +1740,11 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 
                 return `
                     <div class="relative group h-full">
-                        <button onclick="applyQuickCriterion('${escapeInlineJs(c.reason)}', ${c.points}, '${escapeInlineJs(c.category)}')" class="flex flex-col items-start p-3.5 rounded-xl border transition-all text-left w-full h-full ${colorClass}">
-                            <div class="font-bold text-slate-700 text-sm mb-1 group-hover:text-slate-900 line-clamp-2 leading-snug pr-4">${c.reason}</div>
-                            <div class="mt-auto font-black text-sm">${signText}${c.points}đ</div>
+                        <button onclick="applyQuickCriterion('${escapeInlineJs(c.reason)}', ${escapeInlineJs(c.points)}, '${escapeInlineJs(c.category)}')" class="flex flex-col items-start p-3.5 rounded-xl border transition-all text-left w-full h-full ${escapeHtmlText(colorClass)}">
+                            <div class="font-bold text-slate-700 text-sm mb-1 group-hover:text-slate-900 line-clamp-2 leading-snug pr-4">${escapeHtmlText(c.reason)}</div>
+                            <div class="mt-auto font-black text-sm">${signText}${escapeHtmlText(c.points)}đ</div>
                         </button>
-                        <button onclick="deleteCriterion('${typeParam}', ${index})" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white rounded-full shadow-sm" title="Xóa mẫu này">
+                        <button onclick="deleteCriterion('${escapeInlineJs(typeParam)}', ${escapeInlineJs(index)})" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white rounded-full shadow-sm" title="Xóa mẫu này">
                             <i class="ph-bold ph-x text-[10px]"></i>
                         </button>
                     </div>
@@ -1740,7 +1753,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
 
             // Category options
             const categories = ["Học tập", "Phong trào", "Kỷ luật", "Chuyên cần", "Nề nếp", "Khác"];
-            const categoryOptionsHtml = categories.map(cat => `<option value="${cat}" ${pf.category === cat ? 'selected' : ''}>${cat}</option>`).join('');
+            const categoryOptionsHtml = categories.map(cat => `<option value="${escapeHtmlText(cat)}" ${pf.category === cat ? 'selected' : ''}>${cat}</option>`).join('');
 
             // Calculate final display string for the button
             let finalPointsStr = `${sign}${pf.pointsVal > 0 ? pf.pointsVal : 0}đ`;
@@ -1948,24 +1961,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 });
             }
             
-            // Apply points and log history
-            const historyEntry = {
-                id: Date.now(),
-                date: new Date().toISOString(),
-                points: pointsToApply,
-                reason: currentReason + (pf.note ? ` (${pf.note.trim()})` : '') + ` [${pf.category}]`
-            };
-            
-            targetStudents.forEach(s => {
-                // BỎ Math.max ĐỂ TỔNG ĐIỂM XUỐNG ĐƯỢC SỐ ÂM
-                s.points = (s.points || 0) + pointsToApply;
-                
-                // Giữ nguyên Math.max cho phần Sao đổi quà
-                s.stars = Math.max(0, (s.stars || 0) + pointsToApply);
-                
-                if (!s.history) s.history = [];
-                s.history.push({...historyEntry, id: Date.now() + Math.random()}); 
-            });
+            targetStudents.forEach(student=>recordPointChange(student,pointsToApply,currentReason+(pf.note?' ('+pf.note.trim()+')':'')+' ['+pf.category+']'));
             saveData();
             
             state.pointsForm.pointsVal = 0;
@@ -2014,7 +2010,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 <button onclick="selectStudentForRewards(${toInlineJsValue(s.id)})" class="flex-shrink-0 w-32 rounded-2xl flex flex-col items-center justify-center p-4 transition-all duration-300 relative overflow-hidden group ${s.id === selectedStudentId ? 'bg-gradient-to-b from-blue-50 to-white border-2 border-blueAccent shadow-md transform -translate-y-2' : 'border border-slate-200 hover:bg-slate-50 bg-white hover:shadow-sm'}">
                     ${s.id === selectedStudentId ? '<div class="absolute top-0 w-full h-1 bg-blueAccent"></div>' : ''}
                     ${getAvatarImg(s.avatarUrl, s.name, "w-14 h-14 ring-2 ring-slate-100 shadow-sm mb-3 group-hover:scale-110 transition-transform")}
-                    <div class="text-sm font-bold text-slate-800 truncate w-full text-center mb-2">${s.name.split(' ').pop()}</div>
+                    <div class="text-sm font-bold text-slate-800 truncate w-full text-center mb-2">${escapeHtmlText(s.name.split(' ').pop())}</div>
                     <div class="text-xs font-black px-3 py-1 rounded-xl bg-orange-50 text-orange-600 border border-orange-100 flex items-center justify-center gap-1.5 w-full"><i class="ph-fill ph-star text-accent"></i> ${s.stars || 0}</div>
                 </button>
             `).join('');
@@ -2027,19 +2023,19 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 // Khung hiển thị tự điều chỉnh ảnh
                 const imageDisplayHtml = item.imageUrl 
                     ? `<div class="w-full h-40 mb-5 bg-slate-50/80 rounded-2xl flex items-center justify-center overflow-hidden border border-slate-100 p-2 group-hover:shadow-md transition-all">
-                           <img src="${item.imageUrl}" class="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500 drop-shadow-sm">
+                           <img src="${safeImageUrl(item.imageUrl)}" class="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500 drop-shadow-sm">
                        </div>`
-                    : `<div class="w-16 h-16 ${item.bg} rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-sm border border-white ring-4 ring-slate-50"><i class="ph-fill ${item.icon} text-3xl ${item.color}"></i></div>`;
+                    : `<div class="w-16 h-16 ${escapeHtmlText(item.bg)} rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-sm border border-white ring-4 ring-slate-50"><i class="ph-fill ${escapeHtmlText(item.icon)} text-3xl ${escapeHtmlText(item.color)}"></i></div>`;
 
                 return `
                     <div class="bg-white rounded-[2rem] p-2 shadow-sm hover:shadow-xl transition-all duration-300 group border border-slate-200 relative overflow-hidden flex flex-col h-full hover:-translate-y-2">
-                        <div class="absolute top-0 right-0 w-32 h-32 ${item.bg.replace('100', '200')}/40 rounded-bl-full -mr-10 -mt-10 transition-transform duration-500 group-hover:scale-125 z-0"></div>
+                        <div class="absolute top-0 right-0 w-32 h-32 ${escapeHtmlText(item.bg.replace('100', '200'))}/40 rounded-bl-full -mr-10 -mt-10 transition-transform duration-500 group-hover:scale-125 z-0"></div>
                         <div class="bg-white rounded-[1.6rem] p-6 md:p-8 flex flex-col h-full relative z-10">
                             ${imageDisplayHtml}
-                            <h4 class="font-black text-slate-800 text-xl mb-2 leading-tight">${item.name}</h4>
-                            ${item.desc ? `<p class="text-sm text-slate-500 mb-8 font-medium line-clamp-2">${item.desc}</p>` : '<div class="h-6 mb-8"></div>'}
+                            <h4 class="font-black text-slate-800 text-xl mb-2 leading-tight">${escapeHtmlText(item.name)}</h4>
+                            ${item.desc ? `<p class="text-sm text-slate-500 mb-8 font-medium line-clamp-2">${escapeHtmlText(item.desc)}</p>` : '<div class="h-6 mb-8"></div>'}
                             <div class="mt-auto flex items-end justify-between mb-6 pt-5 border-t border-slate-100 border-dashed">
-                                <div class="flex flex-col"><span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">CẦN ĐỂ ĐỔI</span><div class="flex items-center gap-1.5 font-black text-slate-800 text-3xl">${item.cost} <i class="ph-fill ph-star text-accent animate-pulse"></i></div></div>
+                                <div class="flex flex-col"><span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">CẦN ĐỂ ĐỔI</span><div class="flex items-center gap-1.5 font-black text-slate-800 text-3xl">${escapeHtmlText(item.cost)} <i class="ph-fill ph-star text-accent animate-pulse"></i></div></div>
                             </div>
                             ${btnHtml}
                         </div>
@@ -2064,7 +2060,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                                 <div class="text-[11px] text-indigo-200 font-bold uppercase tracking-widest mb-2">BƯỚC 1: CHỌN NGƯỜI ĐỔI QUÀ</div>
                                 <select onchange="selectStudentForRewards(this.value)" class="w-full text-xl md:text-2xl font-black text-white bg-transparent focus:outline-none cursor-pointer border-b-2 border-white/30 pb-3 focus:border-white transition-colors">
                                     <option value="" class="text-slate-800">-- Nhấp để chọn học sinh --</option>
-                                    ${state.students.map(s => `<option value="${s.id}" class="text-slate-800" ${s.id === selectedStudentId ? 'selected' : ''}>${s.name} (${s.stars} sao)</option>`).join('')}
+                                    ${state.students.map(s => `<option value="${escapeHtmlText(s.id)}" class="text-slate-800" ${s.id === selectedStudentId ? 'selected' : ''}>${escapeHtmlText(s.name)} (${escapeHtmlText(s.stars)} sao)</option>`).join('')}
                                 </select>
                             </div>
                         </div>
@@ -2128,8 +2124,8 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         <div class="text-[10px] font-bold text-slate-300 w-3 text-center">${i+1}</div>
                         ${getAvatarImg(m.avatarUrl, m.name, "w-10 h-10 flex-shrink-0 group-hover/member:scale-110 transition-transform")}
                         <div class="flex-1 min-w-0">
-                            <div class="text-sm font-bold text-slate-800 truncate mb-0.5">${m.name}</div>
-                            <div class="text-[9px] text-slate-400 font-bold uppercase tracking-wider truncate">${m.role || 'Thành viên'}</div>
+                            <div class="text-sm font-bold text-slate-800 truncate mb-0.5">${escapeHtmlText(m.name)}</div>
+                            <div class="text-[9px] text-slate-400 font-bold uppercase tracking-wider truncate">${escapeHtmlText(m.role || 'Thành viên')}</div>
                         </div>
                         <div class="text-sm font-bold ${m.points > 0 ? 'text-blueAccent' : 'text-slate-400'} bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100">${m.points || 0}</div>
                     </div>
@@ -2139,32 +2135,32 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 const progressPercent = maxGroupPoints > 0 ? (g.totalPoints / maxGroupPoints) * 100 : 0;
 
                 return `
-                    <div class="rounded-[2rem] bg-white relative group h-full transition-all duration-300 ${wrapperClass} flex flex-col">
+                    <div class="rounded-[2rem] bg-white relative group h-full transition-all duration-300 ${escapeHtmlText(wrapperClass)} flex flex-col">
                         ${rankBadge}
-                        <div class="${innerClass} h-full flex flex-col overflow-hidden relative z-10 flex-1">
-                            <div class="p-6 pb-5 ${bgHeader} relative border-b border-slate-100">
+                        <div class="${escapeHtmlText(innerClass)} h-full flex flex-col overflow-hidden relative z-10 flex-1">
+                            <div class="p-6 pb-5 ${escapeHtmlText(bgHeader)} relative border-b border-slate-100">
                                 <div class="flex justify-between items-start mb-5">
                                     <div class="flex items-center gap-4 pr-2">
-                                        ${g.avatarUrl ? `<img src="${g.avatarUrl}" class="w-16 h-16 rounded-2xl object-cover shadow-sm ring-4 ring-white">` : `<div class="w-16 h-16 rounded-2xl bg-white flex items-center justify-center shadow-sm ring-4 ring-slate-50 border border-slate-100"><i class="ph-fill ph-users-three text-3xl ${g.color}"></i></div>`}
+                                        ${g.avatarUrl ? `<img src="${safeImageUrl(g.avatarUrl)}" class="w-16 h-16 rounded-2xl object-cover shadow-sm ring-4 ring-white">` : `<div class="w-16 h-16 rounded-2xl bg-white flex items-center justify-center shadow-sm ring-4 ring-slate-50 border border-slate-100"><i class="ph-fill ph-users-three text-3xl ${escapeHtmlText(g.color)}"></i></div>`}
                                         <div>
-                                            <h3 class="font-black text-slate-800 text-xl tracking-tight leading-none mb-2">${g.name}</h3>
-                                            <div class="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded inline-block"><i class="ph-fill ph-users"></i> ${g.members.length} Thành viên</div>
+                                            <h3 class="font-black text-slate-800 text-xl tracking-tight leading-none mb-2">${escapeHtmlText(g.name)}</h3>
+                                            <div class="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded inline-block"><i class="ph-fill ph-users"></i> ${escapeHtmlText(g.members.length)} Thành viên</div>
                                         </div>
                                     </div>
                                     <div class="flex flex-col items-end flex-shrink-0">
-                                        <div class="px-4 py-2.5 rounded-xl ${pointColor} flex items-center gap-1.5">
-                                            <span class="font-black text-2xl leading-none">${g.totalPoints}</span>
+                                        <div class="px-4 py-2.5 rounded-xl ${escapeHtmlText(pointColor)} flex items-center gap-1.5">
+                                            <span class="font-black text-2xl leading-none">${escapeHtmlText(g.totalPoints)}</span>
                                             <i class="ph-fill ph-star text-base ${index === 0 ? 'text-yellow-200 animate-pulse' : ''}"></i>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="absolute top-4 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 bg-white/95 backdrop-blur-md p-2 rounded-xl shadow-lg z-20 border border-slate-100">
-                                    <button onclick="pickRandomInGroup('${g.id}')" title="Quay random trong nhóm" class="text-slate-500 hover:text-purple-600 p-2 rounded-lg bg-slate-50 hover:bg-purple-50 transition-colors"><i class="ph-fill ph-dice-three text-lg"></i></button>
-                                    <button onclick="openEditGroupModal('${g.id}')" title="Sửa nhóm" class="text-slate-500 hover:text-blueAccent p-2 rounded-lg bg-slate-50 hover:bg-blue-50 transition-colors"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
-                                    <button onclick="deleteGroup('${g.id}')" title="Xóa nhóm" class="text-slate-500 hover:text-red-500 p-2 rounded-lg bg-slate-50 hover:bg-red-50 transition-colors"><i class="ph-fill ph-trash text-lg"></i></button>
+                                    <button onclick="pickRandomInGroup('${escapeInlineJs(g.id)}')" title="Quay random trong nhóm" class="text-slate-500 hover:text-purple-600 p-2 rounded-lg bg-slate-50 hover:bg-purple-50 transition-colors"><i class="ph-fill ph-dice-three text-lg"></i></button>
+                                    <button onclick="openEditGroupModal('${escapeInlineJs(g.id)}')" title="Sửa nhóm" class="text-slate-500 hover:text-blueAccent p-2 rounded-lg bg-slate-50 hover:bg-blue-50 transition-colors"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
+                                    <button onclick="deleteGroup('${escapeInlineJs(g.id)}')" title="Xóa nhóm" class="text-slate-500 hover:text-red-500 p-2 rounded-lg bg-slate-50 hover:bg-red-50 transition-colors"><i class="ph-fill ph-trash text-lg"></i></button>
                                 </div>
                                 <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden shadow-inner relative">
-                                    <div class="absolute top-0 left-0 h-full bg-gradient-to-r ${progressColor} rounded-full transition-all duration-1000 ease-out" style="width: ${progressPercent}%"></div>
+                                    <div class="absolute top-0 left-0 h-full bg-gradient-to-r ${escapeHtmlText(progressColor)} rounded-full transition-all duration-1000 ease-out" style="width: ${escapeHtmlText(progressPercent)}%"></div>
                                 </div>
                             </div>
                             <div class="p-5 bg-slate-50/50 flex-1 flex flex-col overflow-y-auto custom-scrollbar" style="max-height: 320px;">${membersListHtml}</div>
@@ -2245,9 +2241,9 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
             }
 
             return `
-                <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border ${classes}">
+                <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border ${escapeHtmlText(classes)}">
                     <div class="flex items-center gap-2 min-w-0">
-                        <i class="ph-bold ${icon} text-lg flex-shrink-0"></i>
+                        <i class="ph-bold ${escapeHtmlText(icon)} text-lg flex-shrink-0"></i>
                         <span class="text-xs sm:text-sm font-bold">${label}</span>
                     </div>
                     ${meta.status === "error" && meta.message
@@ -2418,7 +2414,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         else if (colorTheme === 'blue') { activeClass = 'bg-white text-blue-500 border-blue-500'; idleClass = 'bg-white text-blue-500/50 border-blue-500/30 hover:border-blue-500/50'; }
                         else if (colorTheme === 'red') { activeClass = 'bg-white text-red-500 border-red-500'; idleClass = 'bg-white text-red-500/50 border-red-500/30 hover:border-red-500/50'; }
                         
-                        return `<button onclick="markAttendance(${toInlineJsValue(s.id)}, '${val}')" class="w-full h-11 rounded-[0.8rem] border-[1.5px] ${isChecked ? activeClass + ' font-bold' : idleClass + ' font-medium'} transition-colors text-xs flex items-center justify-center">${label}</button>`;
+                        return `<button onclick="markAttendance(${toInlineJsValue(s.id)}, '${escapeInlineJs(val)}')" class="w-full h-11 rounded-[0.8rem] border-[1.5px] ${isChecked ? activeClass + ' font-bold' : idleClass + ' font-medium'} transition-colors text-xs flex items-center justify-center">${label}</button>`;
                     };
 
                     // Lấy lịch sử vi phạm
@@ -2454,8 +2450,8 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                                 <div class="flex items-center gap-4">
                                     ${getAvatarImg(s.avatarUrl, s.name, "w-10 h-10")}
                                     <div class="flex-1 min-w-0">
-                                        <div class="font-black text-[15px] text-slate-800 mb-0.5">${s.name}</div>
-                                        <div class="text-[10px] text-slate-500 font-bold uppercase bg-slate-100 px-2 py-0.5 rounded inline-block">${s.group}</div>
+                                        <div class="font-black text-[15px] text-slate-800 mb-0.5">${escapeHtmlText(s.name)}</div>
+                                        <div class="text-[10px] text-slate-500 font-bold uppercase bg-slate-100 px-2 py-0.5 rounded inline-block">${escapeHtmlText(s.group)}</div>
                                     </div>
                                 </div>
                                 ${historyHtml}
@@ -2478,7 +2474,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         </div>
                         <div class="flex flex-wrap gap-3 items-center w-full md:w-auto">
                             <div class="relative">
-                                <input type="date" value="${currentAttendanceDate}" onchange="changeAttendanceDate(this.value)" class="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-blueAccent w-full md:w-48 shadow-sm">
+                                <input type="date" value="${escapeHtmlText(currentAttendanceDate)}" onchange="changeAttendanceDate(this.value)" class="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-blueAccent w-full md:w-48 shadow-sm">
                             </div>
                             <button id="attendance-sync-button" onclick="syncAttendanceFromGoogle()" class="px-5 py-2.5 bg-emerald-50 text-emerald-700 font-bold rounded-xl border border-emerald-200 hover:bg-emerald-100 flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-arrows-clockwise text-lg"></i> Đồng bộ Sheet</button>
                             <button id="attendance-upload-button" onclick="uploadAllAttendanceToGoogle()" class="px-5 py-2.5 bg-blue-50 text-blue-700 font-bold rounded-xl border border-blue-200 hover:bg-blue-100 flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-60 disabled:cursor-wait"><i class="ph-bold ph-cloud-arrow-up text-lg"></i> Lưu lên Sheet</button>
@@ -2522,7 +2518,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                     return `
                         <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors ${index % 2 !== 0 ? 'bg-slate-50/30' : 'bg-white'}">
                             <td class="p-4 text-center font-bold text-slate-400 text-xs">${index + 1}</td>
-                            <td class="p-4 font-bold text-slate-800 whitespace-nowrap text-sm border-l border-slate-100">${s.name}</td>
+                            <td class="p-4 font-bold text-slate-800 whitespace-nowrap text-sm border-l border-slate-100">${escapeHtmlText(s.name)}</td>
                             <td class="p-4 text-center border-l border-slate-100 font-bold text-sm bg-orange-50/30"><span class="text-emerald-600">${presentCount}</span><span class="text-slate-300 mx-1.5">/</span><span class="text-red-500">${absentCount}</span></td>
                             ${dateCells}
                         </tr>
@@ -2535,7 +2531,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                             <button onclick="switchAttendanceTab('diem-danh')" class="flex-1 md:flex-none px-6 py-2.5 rounded-lg text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors">Thực hiện điểm danh</button>
                             <button onclick="switchAttendanceTab('thong-ke')" class="flex-1 md:flex-none px-6 py-2.5 rounded-lg text-sm font-bold bg-white text-blueAccent shadow-sm">Bảng thống kê</button>
                         </div>
-                        <div class="text-sm font-semibold text-slate-500 bg-slate-50 px-5 py-2.5 rounded-xl border border-slate-200">Tổng số ngày ghi nhận: <span class="font-black text-slate-800 text-lg ml-1">${allDates.length}</span></div>
+                        <div class="text-sm font-semibold text-slate-500 bg-slate-50 px-5 py-2.5 rounded-xl border border-slate-200">Tổng số ngày ghi nhận: <span class="font-black text-slate-800 text-lg ml-1">${escapeHtmlText(allDates.length)}</span></div>
                     </div>
                     <div class="bg-white rounded-[2rem] shadow-sm border border-slate-200 flex-1 flex flex-col overflow-hidden relative z-10 p-2">
                         <div class="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar rounded-xl border border-slate-200">
@@ -2644,13 +2640,13 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
             // Helpr for rendering effect buttons
             const renderEffectBtn = (id, icon, label) => {
                 const isActive = pickerMode === id;
-                return `<button onclick="changePickerMode('${id}')" class="flex-1 py-2.5 px-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${isActive ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}"><i class="ph-fill ${icon} text-lg"></i> ${label}</button>`;
+                return `<button onclick="changePickerMode('${escapeInlineJs(id)}')" class="flex-1 py-2.5 px-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${isActive ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}"><i class="ph-fill ${escapeHtmlText(icon)} text-lg"></i> ${label}</button>`;
             };
 
             // Helper for background buttons
             const renderBgBtn = (id, colorClass, label) => {
                 const isActive = pickerBg === id;
-                return `<button onclick="changePickerBg('${id}')" class="h-10 rounded-xl text-xs font-bold text-white shadow-sm transition-all border-2 ${isActive ? 'border-emerald-500 scale-105' : 'border-transparent hover:scale-105'} ${colorClass}">${label}</button>`;
+                return `<button onclick="changePickerBg('${escapeInlineJs(id)}')" class="h-10 rounded-xl text-xs font-bold text-white shadow-sm transition-all border-2 ${isActive ? 'border-emerald-500 scale-105' : 'border-transparent hover:scale-105'} ${escapeHtmlText(colorClass)}">${label}</button>`;
             }
 
             return `
@@ -2697,7 +2693,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                                     <span class="text-xs font-bold text-slate-600">Thời gian gọi:</span>
                                     <span class="text-sm font-black text-emerald-600">${pickerTime}s</span>
                                 </div>
-                                <input type="range" min="1" max="10" value="${pickerTime}" onchange="pickerTime=parseInt(this.value); renderLayout();" class="w-full accent-emerald-600 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                <input type="range" min="1" max="10" value="${escapeHtmlText(pickerTime)}" onchange="pickerTime=parseInt(this.value); renderLayout();" class="w-full accent-emerald-600 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
                             </div>
 
                             <button onclick="startPicking()" id="btn-start-pick" class="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-lg hover:bg-emerald-700 transition-all hover:-translate-y-1 flex items-center justify-center gap-2 text-lg">
@@ -2707,7 +2703,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                     </div>
 
                     <!-- STAGE -->
-                    <div class="flex-1 rounded-[2rem] overflow-hidden relative border border-slate-200 shadow-inner ${stageBgClass} transition-colors duration-500" id="picker-stage">
+                    <div class="flex-1 rounded-[2rem] overflow-hidden relative border border-slate-200 shadow-inner ${escapeHtmlText(stageBgClass)} transition-colors duration-500" id="picker-stage">
                         <!-- Thẻ (Cards) sẽ được render vào đây bằng JS -->
                     </div>
                 </div>
@@ -2743,14 +2739,14 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 if(pickTarget === 'student') {
                     avatarHtml = getAvatarImg(item.avatarUrl, item.name, "w-16 h-16 pointer-events-none ring-4 ring-white");
                 } else {
-                    avatarHtml = item.avatarUrl ? `<img src="${item.avatarUrl}" class="w-16 h-16 rounded-full object-cover ring-4 ring-white pointer-events-none">` : `<div class="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center ring-4 ring-white"><i class="ph-fill ph-users-three text-3xl text-slate-400"></i></div>`;
+                    avatarHtml = item.avatarUrl ? `<img src="${safeImageUrl(item.avatarUrl)}" class="w-16 h-16 rounded-full object-cover ring-4 ring-white pointer-events-none">` : `<div class="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center ring-4 ring-white"><i class="ph-fill ph-users-three text-3xl text-slate-400"></i></div>`;
                 }
 
                 el.innerHTML = `
-                    <div class="rounded-full p-1" style="background: linear-gradient(135deg, ${borderColor} 0%, transparent 100%);">
+                    <div class="rounded-full p-1" style="background: linear-gradient(135deg, ${escapeHtmlText(borderColor)} 0%, transparent 100%);">
                         ${avatarHtml}
                     </div>
-                    <div class="text-xs font-black text-slate-800 text-center w-full truncate leading-tight pointer-events-none">${item.name}</div>
+                    <div class="text-xs font-black text-slate-800 text-center w-full truncate leading-tight pointer-events-none">${escapeHtmlText(item.name)}</div>
                 `;
                 
                 stage.appendChild(el);
@@ -2900,9 +2896,9 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                     ${getAvatarImg(winner.data.avatarUrl, winner.data.name, 'relative z-10 w-40 h-40 shadow-xl mb-6 ring-8 ring-slate-50 group-hover:scale-105 transition-transform')}
                     
                     <div class="relative z-10 text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">${pickTarget === 'student' ? 'HỌC SINH ĐƯỢC CHỌN' : 'TỔ ĐƯỢC CHỌN'}</div>
-                    <div class="relative z-10 text-3xl md:text-4xl font-black text-slate-800 text-center leading-tight mb-2">${winner.data.name}</div>
+                    <div class="relative z-10 text-3xl md:text-4xl font-black text-slate-800 text-center leading-tight mb-2">${escapeHtmlText(winner.data.name)}</div>
                     
-                    ${winner.data.group ? `<div class="relative z-10 text-sm font-bold text-blue-600 uppercase bg-blue-50 px-4 py-1.5 rounded-xl border border-blue-100">${winner.data.group}</div>` : ''}
+                    ${winner.data.group ? `<div class="relative z-10 text-sm font-bold text-blue-600 uppercase bg-blue-50 px-4 py-1.5 rounded-xl border border-blue-100">${escapeHtmlText(winner.data.group)}</div>` : ''}
                     
                     ${actionBtnHtml}
                 </div>
@@ -2932,11 +2928,11 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         <div class="flex flex-col items-center justify-end group cursor-pointer w-24 sm:w-36 z-${isFirst ? '20' : '10'}" onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(student.id)})">
                             <div class="relative mb-4 z-10 transform transition-transform duration-300 ${isFirst ? 'group-hover:scale-125' : 'group-hover:scale-110'}">
                                 ${getAvatarImg(student.avatarUrl, student.name, `w-16 h-16 sm:w-20 sm:h-20 ring-4 ring-white shadow-xl ${isFirst ? 'border-4 border-yellow-400' : ''}`)}
-                                <div class="absolute -top-3 -right-3 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black text-white shadow-lg border-2 border-white" style="background: ${badgeColor}">${rank}</div>
+                                <div class="absolute -top-3 -right-3 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black text-white shadow-lg border-2 border-white" style="background: ${escapeHtmlText(badgeColor)}">${rank}</div>
                                 ${isFirst ? '<i class="ph-fill ph-crown text-3xl absolute -top-10 left-1/2 -translate-x-1/2 text-yellow-400 drop-shadow-md animate-bounce-slight"></i>' : ''}
                             </div>
-                            <div class="text-white font-bold text-sm sm:text-base mb-4 drop-shadow-md truncate w-full text-center px-1">${student.name.split(' ').pop()}</div>
-                            <div class="w-full ${heightClass} ${bgStyle} rounded-t-[1.5rem] flex flex-col items-center justify-start pt-5 shadow-[0_-10px_20px_${shadowColor}] relative overflow-hidden transition-all duration-300 group-hover:brightness-110">
+                            <div class="text-white font-bold text-sm sm:text-base mb-4 drop-shadow-md truncate w-full text-center px-1">${escapeHtmlText(student.name.split(' ').pop())}</div>
+                            <div class="w-full ${escapeHtmlText(heightClass)} ${escapeHtmlText(bgStyle)} rounded-t-[1.5rem] flex flex-col items-center justify-start pt-5 shadow-[0_-10px_20px_${escapeHtmlText(shadowColor)}] relative overflow-hidden transition-all duration-300 group-hover:brightness-110">
                                 <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4xKSIvPjwvc3ZnPg==')]"></div>
                                 <span class="font-black text-2xl sm:text-3xl text-white leading-none drop-shadow-lg relative z-10">${student.points || 0}</span>
                                 <span class="text-[10px] text-white/70 font-bold uppercase mt-1 relative z-10">Điểm</span>
@@ -2949,7 +2945,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                     <div class="flex items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-3 hover:shadow-md hover:border-blue-200 cursor-pointer transition-all hover:-translate-y-1" onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(s.id)})">
                         <div class="w-12 font-black text-center text-slate-300 text-xl">${i + 4}</div>
                         ${getAvatarImg(s.avatarUrl, s.name, "w-12 h-12 ring-2 ring-slate-100")}
-                        <div class="flex-1 min-w-0"><div class="font-bold text-slate-800 text-base truncate">${s.name}</div><div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">${s.group}</div></div>
+                        <div class="flex-1 min-w-0"><div class="font-bold text-slate-800 text-base truncate">${escapeHtmlText(s.name)}</div><div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">${escapeHtmlText(s.group)}</div></div>
                         <div class="font-black text-blueAccent text-2xl pr-2">${s.points || 0}</div>
                     </div>
                 `).join('');
@@ -2989,10 +2985,10 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                     <div class="flex items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-3 hover:shadow-md cursor-pointer transition-transform hover:-translate-y-1" onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(s.id)})">
                         <div class="w-8 h-8 rounded-full flex items-center justify-center font-black ${i < 3 ? (type==='week'?'bg-emerald-100 text-emerald-600':'bg-blue-100 text-blue-600') : 'bg-slate-100 text-slate-400'}">${i + 1}</div>
                         ${getAvatarImg(s.avatarUrl, s.name, "w-10 h-10")}
-                        <div class="flex-1 min-w-0"><div class="font-bold text-slate-800 text-sm truncate">${s.name}</div><div class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">${s.group}</div></div>
+                        <div class="flex-1 min-w-0"><div class="font-bold text-slate-800 text-sm truncate">${escapeHtmlText(s.name)}</div><div class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">${escapeHtmlText(s.group)}</div></div>
                         <div class="flex flex-col items-end">
                             <div class="font-black ${type==='week'?'text-emerald-600':'text-blue-600'} text-base ${type==='week'?'bg-emerald-50':'bg-blue-50'} px-3 py-1 rounded-lg">+${type === 'week' ? s.weekProg : s.monthProg}</div>
-                            <div class="text-[9px] text-slate-400 font-bold uppercase mt-1.5 tracking-wider">Tổng: ${s.points}</div>
+                            <div class="text-[9px] text-slate-400 font-bold uppercase mt-1.5 tracking-wider">Tổng: ${escapeHtmlText(s.points)}</div>
                         </div>
                     </div>
                 `).join('');
@@ -3075,8 +3071,8 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
             const tableRowsHtml = sortedStudents.map((s, index) => `
                 <div class="grid grid-cols-12 gap-4 py-4 border-b border-slate-100 items-center hover:bg-blue-50/50 transition-colors text-sm font-semibold text-slate-700">
                     <div class="col-span-1 pl-6 text-slate-400">${index + 1}</div>
-                    <div class="col-span-4 font-bold text-slate-800 flex items-center gap-3">${getAvatarImg(s.avatarUrl, s.name, 'w-8 h-8 rounded-full')} ${s.name}</div>
-                    <div class="col-span-3"><span class="bg-slate-100 px-3 py-1 rounded-lg text-xs border border-slate-200">${s.group}</span></div>
+                    <div class="col-span-4 font-bold text-slate-800 flex items-center gap-3">${getAvatarImg(s.avatarUrl, s.name, 'w-8 h-8 rounded-full')} ${escapeHtmlText(s.name)}</div>
+                    <div class="col-span-3"><span class="bg-slate-100 px-3 py-1 rounded-lg text-xs border border-slate-200">${escapeHtmlText(s.group)}</span></div>
                     <div class="col-span-2 font-black text-blueAccent text-base">${s.points || 0}</div>
                     <div class="col-span-2 font-bold text-orange-500 flex items-center gap-1">${s.stars || 0} <i class="ph-fill ph-star"></i></div>
                 </div>
@@ -3092,7 +3088,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                             ${getAvatarImg(s.avatarUrl, s.name, "w-14 h-14 rounded-2xl ring-4 ring-white shadow-sm object-cover")}
                         </div>
                         <div class="flex-1 min-w-0">
-                            <div class="font-bold text-slate-800 text-base truncate">${s.name}</div>
+                            <div class="font-bold text-slate-800 text-base truncate">${escapeHtmlText(s.name)}</div>
                             <div class="flex flex-wrap items-center gap-2 mt-1.5">
                                 <span class="text-[10px] font-bold bg-white border border-slate-200 text-slate-500 px-2 py-0.5 rounded-lg">${s.group || 'Tổ 1'}</span>
                                 <span class="text-[10px] font-black text-[#1e1b4b] bg-indigo-100 px-2 py-0.5 rounded-lg">${s.points || 0} Đ</span>
@@ -3175,7 +3171,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         <tr class="hover:bg-slate-50/80 transition-colors">
                             <td class="p-3 text-center border-b border-r border-slate-100 text-slate-400 font-bold">${index + 1}</td>
                             <td class="p-3 border-b border-r border-slate-100 font-bold text-slate-800 whitespace-nowrap flex items-center gap-2">
-                                ${getAvatarImg(s.avatarUrl, s.name, 'w-6 h-6')} ${s.name}
+                                ${getAvatarImg(s.avatarUrl, s.name, 'w-6 h-6')} ${escapeHtmlText(s.name)}
                             </td>
                             ${cellsHtml}
                         </tr>
@@ -3261,7 +3257,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         <tr class="hover:bg-slate-50/80 transition-colors">
                             <td class="p-3 text-center border-b border-r border-slate-100 text-slate-400 font-bold">${index + 1}</td>
                             <td class="p-3 border-b border-r border-slate-100 font-bold text-slate-800 whitespace-nowrap flex items-center gap-2">
-                                ${getAvatarImg(s.avatarUrl, s.name, 'w-6 h-6')} ${s.name}
+                                ${getAvatarImg(s.avatarUrl, s.name, 'w-6 h-6')} ${escapeHtmlText(s.name)}
                             </td>
                             ${cellsHtml}
                         </tr>
@@ -3317,7 +3313,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         <tr class="hover:bg-slate-50/80 transition-colors">
                             <td class="p-3 text-center border-b border-r border-slate-100 text-slate-400 font-bold">${index + 1}</td>
                             <td class="p-3 border-b border-r border-slate-100 font-bold text-slate-800 whitespace-nowrap flex items-center gap-2">
-                                ${getAvatarImg(s.avatarUrl, s.name, 'w-6 h-6')} ${s.name}
+                                ${getAvatarImg(s.avatarUrl, s.name, 'w-6 h-6')} ${escapeHtmlText(s.name)}
                             </td>
                             <td class="p-3 text-center border-b border-r border-slate-100 font-bold text-emerald-600 bg-emerald-50/30">${hk1Plus > 0 ? '+' + hk1Plus : '<span class="text-slate-200 font-normal">-</span>'}</td>
                             <td class="p-3 text-center border-b border-r border-slate-100 font-bold text-red-500 bg-red-50/30">${hk1Minus > 0 ? '-' + hk1Minus : '<span class="text-slate-200 font-normal">-</span>'}</td>
@@ -3508,13 +3504,13 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                         : '<p class="mt-2 text-xs font-bold text-emerald-700">Cấu trúc hợp lệ</p>';
 
                     return `
-                        <div class="p-4 rounded-2xl border ${itemClass}">
+                        <div class="p-4 rounded-2xl border ${escapeHtmlText(itemClass)}">
                             <div class="flex items-start justify-between gap-3">
                                 <div>
                                     <div class="font-black text-slate-800">${escapeHtmlText(item.name || "")}</div>
                                     <div class="mt-0.5 text-xs text-slate-500">${escapeHtmlText(item.details || "")}</div>
                                 </div>
-                                <i class="ph-fill ${iconClass} text-xl flex-shrink-0"></i>
+                                <i class="ph-fill ${escapeHtmlText(iconClass)} text-xl flex-shrink-0"></i>
                             </div>
                             ${issueHtml}
                         </div>
@@ -3557,8 +3553,8 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                                 Kiểm tra file dữ liệu, các sheet bắt buộc và tiêu đề cột trước khi sử dụng.
                             </p>
                         </div>
-                        <span class="inline-flex self-start items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black ${statusClass}">
-                            <i class="ph-fill ${statusIcon} text-base"></i>
+                        <span class="inline-flex self-start items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black ${escapeHtmlText(statusClass)}">
+                            <i class="ph-fill ${escapeHtmlText(statusIcon)} text-base"></i>
                             ${statusLabel}
                         </span>
                     </div>
@@ -3600,7 +3596,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 { id: 'nguy-hiem', label: 'Vùng nguy hiểm', icon: 'ph-warning-octagon' }
             ].map(tab => {
                 const isActive = state.settingsTab === tab.id;
-                return `<button onclick="switchSettingsTab('${tab.id}')" class="px-6 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${isActive ? 'bg-[#1e1b4b] text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:text-slate-800'}"><i class="ph-fill ${tab.icon} text-lg"></i> ${tab.label}</button>`;
+                return `<button onclick="switchSettingsTab('${escapeInlineJs(tab.id)}')" class="px-6 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${isActive ? 'bg-[#1e1b4b] text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:text-slate-800'}"><i class="ph-fill ${escapeHtmlText(tab.icon)} text-lg"></i> ${escapeHtmlText(tab.label)}</button>`;
             }).join('');
 
             let contentHtml = '';
@@ -3643,16 +3639,16 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                             ${state.rewards.map(r => `
                                 <div class="p-5 border border-slate-200 rounded-2xl flex items-center gap-4 bg-slate-50/50 hover:bg-slate-50 transition-colors group">
                                     ${r.imageUrl 
-                                        ? `<div class="w-14 h-14 rounded-2xl overflow-hidden shadow-sm border border-white ring-2 ring-slate-50 flex-shrink-0 bg-white"><img src="${r.imageUrl}" class="w-full h-full object-contain p-1"></div>` 
-                                        : `<div class="w-14 h-14 ${r.bg} ${r.color} rounded-2xl flex items-center justify-center text-2xl shadow-sm border border-white flex-shrink-0"><i class="ph-fill ${r.icon}"></i></div>`
+                                        ? `<div class="w-14 h-14 rounded-2xl overflow-hidden shadow-sm border border-white ring-2 ring-slate-50 flex-shrink-0 bg-white"><img src="${safeImageUrl(r.imageUrl)}" class="w-full h-full object-contain p-1"></div>`
+                                        : `<div class="w-14 h-14 ${escapeHtmlText(r.bg)} ${escapeHtmlText(r.color)} rounded-2xl flex items-center justify-center text-2xl shadow-sm border border-white flex-shrink-0"><i class="ph-fill ${escapeHtmlText(r.icon)}"></i></div>`
                                     }
                                     <div class="flex-1 min-w-0">
-                                        <div class="font-bold text-slate-800 text-sm truncate">${r.name}</div>
-                                        <div class="text-xs font-black text-orange-500 flex items-center gap-1">${r.cost} <i class="ph-fill ph-star"></i></div>
+                                        <div class="font-bold text-slate-800 text-sm truncate">${escapeHtmlText(r.name)}</div>
+                                        <div class="text-xs font-black text-orange-500 flex items-center gap-1">${escapeHtmlText(r.cost)} <i class="ph-fill ph-star"></i></div>
                                     </div>
                                     <div class="flex flex-col gap-2">
-                                        <button onclick="openEditRewardModal('${r.id}')" class="text-slate-400 hover:text-blueAccent transition-colors"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
-                                        <button onclick="deleteReward('${r.id}')" class="text-slate-400 hover:text-red-500 transition-colors"><i class="ph-fill ph-trash text-lg"></i></button>
+                                        <button onclick="openEditRewardModal('${escapeInlineJs(r.id)}')" class="text-slate-400 hover:text-blueAccent transition-colors"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
+                                        <button onclick="deleteReward('${escapeInlineJs(r.id)}')" class="text-slate-400 hover:text-red-500 transition-colors"><i class="ph-fill ph-trash text-lg"></i></button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -3811,7 +3807,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                 
                 const previewContainer = document.getElementById('reward-image-preview');
                 if(previewContainer) {
-                    previewContainer.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-contain p-2">`;
+                    previewContainer.innerHTML = `<img src="${safeImageUrl(dataUrl)}" class="w-full h-full object-contain p-2">`;
                 }
             }, 800, 0.8);
         };
@@ -3833,7 +3829,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                                 <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Ảnh minh họa quà tặng</label>
                                 <div class="relative cursor-pointer group" onclick="document.getElementById('edit-reward-image-upload').click()">
                                     <div id="reward-image-preview" class="w-full h-40 rounded-2xl bg-white flex items-center justify-center overflow-hidden border-2 border-dashed border-slate-300 group-hover:border-blueAccent transition-colors shadow-sm">
-                                        ${reward.imageUrl ? `<img src="${reward.imageUrl}" class="w-full h-full object-contain p-2">` : `<div class="text-slate-400 flex flex-col items-center"><i class="ph-fill ph-image text-4xl mb-2"></i><span class="text-xs font-bold">Bấm để tải ảnh lên</span></div>`}
+                                        ${reward.imageUrl ? `<img src="${safeImageUrl(reward.imageUrl)}" class="w-full h-full object-contain p-2">` : `<div class="text-slate-400 flex flex-col items-center"><i class="ph-fill ph-image text-4xl mb-2"></i><span class="text-xs font-bold">Bấm để tải ảnh lên</span></div>`}
                                     </div>
                                     <div class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
                                         <span class="text-white text-sm font-bold flex items-center gap-2"><i class="ph-bold ph-upload-simple text-lg"></i> Chọn ảnh</span>
@@ -3847,7 +3843,7 @@ setInterval(()=>{if(document.visibilityState==='visible' && state.currentTab==='
                             <div><label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Mô tả (Tùy chọn)</label><input type="text" id="edit-reward-desc" value="${escapeHtmlAttr(reward.desc || '')}" class="w-full px-4 py-3.5 bg-white border border-slate-300 rounded-xl text-sm focus:border-blueAccent focus:ring-4 focus:ring-blue-100 transition-all shadow-sm"></div>
                             <div><label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Điểm sao cần để đổi</label>
                                 <div class="relative">
-                                    <input type="number" id="edit-reward-cost" value="${reward.cost}" class="w-full pl-4 pr-10 py-3.5 bg-white border border-slate-300 rounded-xl text-base font-black text-orange-600 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 transition-all shadow-sm">
+                                    <input type="number" id="edit-reward-cost" value="${escapeHtmlText(reward.cost)}" class="w-full pl-4 pr-10 py-3.5 bg-white border border-slate-300 rounded-xl text-base font-black text-orange-600 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 transition-all shadow-sm">
                                     <i class="ph-fill ph-star absolute right-4 top-1/2 -translate-y-1/2 text-accent text-lg"></i>
                                 </div>
                             </div>
@@ -4159,15 +4155,15 @@ function openEditStudentModal(id) {
             const s = id ? state.students.find(x => x.id === id) : { name: '', role: '', goal: '', talent: '', group: 'Tổ 1', avatarUrl: '', gender: 'Nữ', dob: '', boardingType: 'Ngoại trú' };
             if (!s && id) return;
             const roleOptions = ['Lớp trưởng', 'Lớp phó học tập', 'Lớp phó phong trào', 'Bí thư', 'Tổ trưởng'].map(role => 
-                `<button onclick="document.getElementById('edit-s-role').value='${role}'" class="px-3 py-1.5 bg-slate-50 border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-600 text-[12px] font-bold rounded-lg transition-colors shadow-sm">+ ${role}</button>`
+                `<button onclick="document.getElementById('edit-s-role').value='${escapeInlineJs(role)}'" class="px-3 py-1.5 bg-slate-50 border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-600 text-[12px] font-bold rounded-lg transition-colors shadow-sm">+ ${role}</button>`
             ).join('');
             const goalOptions = ['HS xuất sắc', 'HS giỏi', 'HS giỏi nhất trường', 'Tự tin giao tiếp'].map(goal => 
-                `<button onclick="document.getElementById('edit-s-goal').value='${goal}'" class="px-3 py-1.5 bg-blue-50 border border-blue-100 text-blue-600 hover:bg-blue-100 text-[12px] font-bold rounded-lg transition-colors shadow-sm">+ ${goal}</button>`
+                `<button onclick="document.getElementById('edit-s-goal').value='${escapeInlineJs(goal)}'" class="px-3 py-1.5 bg-blue-50 border border-blue-100 text-blue-600 hover:bg-blue-100 text-[12px] font-bold rounded-lg transition-colors shadow-sm">+ ${goal}</button>`
             ).join('');
             const talentOptions = ['Bóng đá', 'Bóng rổ', 'Bóng chuyền', 'Vẽ', 'Hát', 'Nhảy', 'Biên đạo', 'Múa', 'MC'].map(talent => 
-                `<button onclick="const el = document.getElementById('edit-s-talent'); el.value = el.value ? el.value + ', ${talent}' : '${talent}'" class="px-3 py-1.5 bg-purple-50 border border-purple-100 text-purple-600 hover:bg-purple-100 text-[12px] font-bold rounded-lg transition-colors shadow-sm">+ ${talent}</button>`
+                `<button onclick="const el = document.getElementById('edit-s-talent'); el.value = el.value ? el.value + ', ${escapeInlineJs(talent)}' : '${escapeInlineJs(talent)}'" class="px-3 py-1.5 bg-purple-50 border border-purple-100 text-purple-600 hover:bg-purple-100 text-[12px] font-bold rounded-lg transition-colors shadow-sm">+ ${talent}</button>`
             ).join('');
-            const groupOptions = state.groups.map(g => `<option value="${g.name}" ${s.group===g.name?'selected':''}>${g.name}</option>`).join('');
+            const groupOptions = state.groups.map(g => `<option value="${escapeHtmlText(g.name)}" ${s.group===g.name?'selected':''}>${escapeHtmlText(g.name)}</option>`).join('');
             const modalHtml = `
                 <div class="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in" id="edit-student-modal">
                     <div class="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -4288,7 +4284,7 @@ function openEditStudentModal(id) {
                         </div>
                         <!-- Footer -->
                         <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center rounded-b-[2rem]">
-                            ${id ? `<button onclick="deleteStudent(${toInlineJsValue(id)}); closeModal('edit-student-modal')" class="px-6 py-3.5 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition-colors flex items-center gap-2 shadow-sm border border-red-100"><i class="ph-bold ph-trash"></i> Xóa</button>` : '<div></div>'}
+                            ${id ? `<button onclick="deleteStudent(${toInlineJsValue(id)}); closeModal('edit-student-modal')" class="px-6 py-3.5 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition-colors flex items-center gap-2 shadow-sm border border-red-100"><i class="ph-bold ph-archive"></i> Ngừng theo dõi</button>` : '<div></div>'}
                             <div class="flex gap-3">
                                 <button onclick="closeModal('edit-student-modal')" class="px-8 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors">Hủy</button>
                                 <button id="save-student-button" onclick="saveStudentEdit()" class="px-10 py-3.5 bg-[#0f172a] text-white font-black rounded-xl hover:bg-black shadow-lg transition-all hover:-translate-y-0.5">Lưu Hồ Sơ</button>
@@ -4465,28 +4461,7 @@ window.saveStudentEdit = async function() {
     }
 };
 
-window.deleteStudent = function(id) {
-    const studentIndex = state.students.findIndex(s => s.id === id);
-    if (studentIndex === -1) return;
-    
-    const studentName = state.students[studentIndex].name;
-    if (confirm(`Bạn có chắc chắn muốn xóa học sinh "${studentName}" khỏi danh sách không? Hành động này sẽ xóa luôn cả lịch sử thi đua của em ấy và không thể hoàn tác!`)) {
-        
-        state.students.splice(studentIndex, 1);
-        
-        if (state.attendanceRecords) {
-            for (const date in state.attendanceRecords) {
-                if (state.attendanceRecords[date][id]) {
-                    delete state.attendanceRecords[date][id];
-                }
-            }
-        }
-        
-        saveData();
-        renderLayout();
-        showToast(`Đã xóa triệt để ${studentName} khỏi hệ thống!`, "success");
-    }
-};
+window.deleteStudent = function() { showToast('Chưa tải được công cụ lưu trữ an toàn. Hãy tải lại trang; dữ liệu chưa bị thay đổi.','error'); };
 window.openEditGroupModal = function(id) {
             state.editingGroupId = id; 
             const group = state.groups.find(g => g.id === id || g.id === String(id)); 
@@ -4503,14 +4478,14 @@ window.openEditGroupModal = function(id) {
                             <div>
                                 <div class="relative cursor-pointer group inline-block mb-3" onclick="document.getElementById('edit-group-avatar-upload').click()">
                                     <div id="group-avatar-preview-container" class="transition-transform group-hover:scale-105 duration-300">
-                                        ${group.avatarUrl ? `<img src="${group.avatarUrl}" class="w-28 h-28 rounded-3xl mx-auto object-cover shadow-lg ring-4 ring-white">` : `<div class="w-28 h-28 rounded-3xl mx-auto bg-white flex items-center justify-center shadow-md ring-2 ring-slate-200"><i class="ph-fill ph-image text-5xl text-slate-300"></i></div>`}
+                                        ${group.avatarUrl ? `<img src="${safeImageUrl(group.avatarUrl)}" class="w-28 h-28 rounded-3xl mx-auto object-cover shadow-lg ring-4 ring-white">` : `<div class="w-28 h-28 rounded-3xl mx-auto bg-white flex items-center justify-center shadow-md ring-2 ring-slate-200"><i class="ph-fill ph-image text-5xl text-slate-300"></i></div>`}
                                     </div>
                                     <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                         <div class="bg-black/60 rounded-full p-3 text-white"><i class="ph-bold ph-upload-simple"></i></div>
                                     </div>
                                     <input type="file" id="edit-group-avatar-upload" class="hidden" accept="image/*" onchange="handleGroupAvatarUpload(event)">
                                 </div>
-                                <input type="text" id="edit-group-avatar" value="${group.avatarUrl || ''}" class="hidden">
+                                <input type="text" id="edit-group-avatar" value="${escapeHtmlText(group.avatarUrl || '')}" class="hidden">
                                 <div class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Ảnh đại diện Tổ</div>
                             </div>
                             <div class="text-left">
@@ -4840,8 +4815,8 @@ window.openEditGroupModal = function(id) {
                 <div class="flex flex-col items-center p-8 bg-slate-50/80 rounded-[2rem] border border-slate-200 shadow-sm w-72 group relative overflow-hidden">
                     <div class="absolute inset-0 bg-gradient-to-b from-transparent to-blue-50/50"></div>
                     ${getAvatarImg(winner.avatarUrl, winner.name, 'relative z-10 w-36 h-36 shadow-xl mb-6 ring-4 ring-white group-hover:scale-105 transition-transform')}
-                    <div class="relative z-10 text-3xl font-black text-slate-800 mb-2 leading-tight">${winner.name}</div>
-                    <div class="relative z-10 text-[11px] font-bold text-slate-500 uppercase bg-white border border-slate-200 px-4 py-1.5 rounded-xl">${group.name}</div>
+                    <div class="relative z-10 text-3xl font-black text-slate-800 mb-2 leading-tight">${escapeHtmlText(winner.name)}</div>
+                    <div class="relative z-10 text-[11px] font-bold text-slate-500 uppercase bg-white border border-slate-200 px-4 py-1.5 rounded-xl">${escapeHtmlText(group.name)}</div>
                     <button onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(winner.id)}); closeModal('random-result-modal');" class="relative z-10 mt-8 w-full py-3.5 bg-blueAccent text-white font-black rounded-xl shadow-md hover:bg-blue-600 flex items-center justify-center gap-2 transition-all hover:-translate-y-1"><i class="ph-fill ph-star text-lg"></i> KHEN THƯỞNG</button>
                 </div>
             `;
@@ -4853,8 +4828,8 @@ window.openEditGroupModal = function(id) {
             const winner = state.groups[Math.floor(Math.random() * state.groups.length)];
             const content = `
                 <div class="flex flex-col items-center p-10 bg-slate-50/80 rounded-[2rem] border border-slate-200 shadow-sm w-80">
-                    ${winner.avatarUrl ? `<img src="${winner.avatarUrl}" class="w-40 h-40 rounded-[2rem] object-cover shadow-xl mb-6 ring-8 ring-white">` : `<div class="w-40 h-40 rounded-[2rem] bg-white flex items-center justify-center shadow-xl border-4 border-slate-50 mb-6"><i class="ph-fill ph-users-three text-7xl ${winner.color}"></i></div>`}
-                    <div class="text-4xl font-black text-slate-800 tracking-tight">${winner.name}</div>
+                    ${winner.avatarUrl ? `<img src="${safeImageUrl(winner.avatarUrl)}" class="w-40 h-40 rounded-[2rem] object-cover shadow-xl mb-6 ring-8 ring-white">` : `<div class="w-40 h-40 rounded-[2rem] bg-white flex items-center justify-center shadow-xl border-4 border-slate-50 mb-6"><i class="ph-fill ph-users-three text-7xl ${escapeHtmlText(winner.color)}"></i></div>`}
+                    <div class="text-4xl font-black text-slate-800 tracking-tight">${escapeHtmlText(winner.name)}</div>
                 </div>
             `;
             showRandomResultModal("Tổ May Mắn", content);
@@ -4870,9 +4845,9 @@ window.openEditGroupModal = function(id) {
                     html += `
                         <div class="flex flex-col items-center p-6 bg-white rounded-[2rem] border border-slate-200 w-48 shadow-sm hover:shadow-xl transition-all hover:-translate-y-2 group relative overflow-hidden">
                             <div class="absolute top-0 right-0 w-20 h-20 bg-slate-50 rounded-bl-full -mr-4 -mt-4 z-0"></div>
-                            <div class="relative z-10 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">${g.name}</div>
+                            <div class="relative z-10 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">${escapeHtmlText(g.name)}</div>
                             ${getAvatarImg(winner.avatarUrl, winner.name, 'relative z-10 w-24 h-24 shadow-md mb-5 ring-4 ring-slate-50 group-hover:scale-110 transition-transform')}
-                            <div class="relative z-10 text-base font-black text-slate-800 text-center break-words w-full mb-4 leading-tight">${winner.name}</div>
+                            <div class="relative z-10 text-base font-black text-slate-800 text-center break-words w-full mb-4 leading-tight">${escapeHtmlText(winner.name)}</div>
                             <button onclick="switchTab('tich-diem'); selectStudentForPoints(${toInlineJsValue(winner.id)}); closeModal('random-result-modal');" class="relative z-10 mt-auto w-full py-2.5 bg-blue-50 text-blueAccent font-bold rounded-xl hover:bg-blue-100 transition-colors">Chọn</button>
                         </div>
                     `;
@@ -4957,8 +4932,8 @@ window.openEditGroupModal = function(id) {
         
         function openResetPointsModal() {
             let optionsHtml = `<option value="all">Tất cả học sinh</option>`;
-            state.groups.forEach(g => optionsHtml += `<option value="group_${g.name}">Tổ: ${g.name}</option>`);
-            state.students.forEach(s => optionsHtml += `<option value="student_${s.id}">Cá nhân: ${s.name}</option>`);
+            state.groups.forEach(g => optionsHtml += `<option value="group_${escapeHtmlText(g.name)}">Tổ: ${escapeHtmlText(g.name)}</option>`);
+            state.students.forEach(s => optionsHtml += `<option value="student_${escapeHtmlText(s.id)}">Cá nhân: ${escapeHtmlText(s.name)}</option>`);
 
             document.getElementById('modal-container').innerHTML = `
                 <div class="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in" id="reset-points-modal">
@@ -4987,7 +4962,7 @@ window.openEditGroupModal = function(id) {
             let count = 0;
             state.students.forEach(s => {
                 let shouldReset = (target === 'all') || (target.startsWith('group_') && s.group === target.replace('group_', '')) || (target.startsWith('student_') && s.id.toString() === target.replace('student_', ''));
-                if (shouldReset) { if (type === 'stars') s.stars = 0; else { s.points = 0; s.stars = 0; } count++; }
+                if (shouldReset) { s.balanceEpoch='reset_'+Date.now()+'_'+Math.random();if (type === 'stars') s.stars = 0; else { s.points = 0; s.stars = 0; } count++; }
             });
             saveData(); renderLayout(); closeModal('reset-points-modal'); showToast(`Đã đặt lại điểm cho ${count} học sinh!`, "success");
         }
@@ -5080,7 +5055,7 @@ window.openEditGroupModal = function(id) {
                 ? ""
                 : '<button onclick="closeModal(\'parent-lookup-modal\')" class="absolute top-6 right-6 text-slate-400 hover:bg-slate-100 rounded-full p-2 transition-colors"><i class="ph-bold ph-x text-xl"></i></button>';
             document.getElementById('modal-container').innerHTML = `
-                <div class="fixed inset-0 ${overlayBackground} z-[100] overflow-y-auto p-4 animate-fade-in" id="parent-lookup-modal"><div class="w-full max-w-3xl mx-auto py-6">${renderParentHomework('')}
+                <div class="fixed inset-0 ${escapeHtmlText(overlayBackground)} z-[100] overflow-y-auto p-4 animate-fade-in" id="parent-lookup-modal"><div class="w-full max-w-3xl mx-auto py-6">${renderParentHomework('')}
                     <div class="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md mx-auto mt-6 overflow-hidden flex flex-col relative text-center pt-8 pb-8 px-8">
                         ${closeButton}
                         <div class="w-24 h-24 bg-gradient-to-br from-orange-100 to-amber-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner"><i class="ph-fill ph-student text-5xl text-orange-500"></i></div>
@@ -6174,9 +6149,9 @@ window.performDirectLookup = function() {
                     <div class="bg-primary text-white p-5 sticky top-0 z-20 flex justify-between items-center shadow-lg print:hidden">
                         <div class="flex items-center gap-4">
                             <div class="w-12 h-12 bg-white/10 rounded-[1rem] flex items-center justify-center"><i class="ph-fill ph-student text-2xl text-orange-400"></i></div>
-                            <div><div class="font-black text-lg tracking-tight">HỒ SƠ HỌC TẬP</div><div class="text-[10px] text-slate-300 font-bold uppercase tracking-widest">${state.admin.className}</div></div>
+                            <div><div class="font-black text-lg tracking-tight">HỒ SƠ HỌC TẬP</div><div class="text-[10px] text-slate-300 font-bold uppercase tracking-widest">${escapeHtmlText(state.admin.className)}</div></div>
                         </div>
-                        <button onclick="${closeAction}" class="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors"><i class="ph-bold ph-sign-out text-lg"></i> ${closeLabel}</button>
+                        <button onclick="${toInlineJsValue(closeAction)}" class="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors"><i class="ph-bold ph-sign-out text-lg"></i> ${closeLabel}</button>
                     </div>
                     
                     <div class="flex-1 p-4 md:p-8 max-w-4xl mx-auto w-full space-y-8 pb-12 mt-4">
@@ -6184,10 +6159,10 @@ window.performDirectLookup = function() {
                             <div class="absolute top-0 right-0 w-64 h-64 bg-orange-50 rounded-bl-full -mr-20 -mt-20 z-0 opacity-50"></div>
                             <div class="relative z-10 flex-shrink-0">${getAvatarImg(student.avatarUrl, student.name, "w-32 h-32 ring-8 ring-orange-50 shadow-xl")}</div>
                             <div class="flex-1 relative z-10 w-full">
-                                <h2 class="text-3xl md:text-4xl font-black text-slate-800 mb-3">${student.name}</h2>
+                                <h2 class="text-3xl md:text-4xl font-black text-slate-800 mb-3">${escapeHtmlText(student.name)}</h2>
                                 <div class="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-8">
-                                    <span class="text-xs font-bold bg-slate-100 text-slate-600 px-4 py-2 rounded-xl border border-slate-200"><i class="ph-fill ph-users mr-1"></i> ${student.group}</span>
-                                    <span class="text-xs font-bold bg-blue-50 text-blue-700 px-4 py-2 rounded-xl border border-blue-100"><i class="ph-fill ph-shield-star mr-1"></i> ${student.role || 'Thành viên'}</span>
+                                    <span class="text-xs font-bold bg-slate-100 text-slate-600 px-4 py-2 rounded-xl border border-slate-200"><i class="ph-fill ph-users mr-1"></i> ${escapeHtmlText(student.group)}</span>
+                                    <span class="text-xs font-bold bg-blue-50 text-blue-700 px-4 py-2 rounded-xl border border-blue-100"><i class="ph-fill ph-shield-star mr-1"></i> ${escapeHtmlText(student.role || 'Thành viên')}</span>
                                 </div>
                                 <div class="grid grid-cols-2 gap-4">
                                     <div class="bg-slate-50 rounded-2xl p-5 border border-slate-200 shadow-inner"><div class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">TỔNG ĐIỂM</div><div class="text-4xl font-black text-slate-800">${student.points || 0}</div></div>
@@ -6200,11 +6175,11 @@ window.performDirectLookup = function() {
                             <h3 class="font-black text-slate-800 mb-10 flex items-center gap-3 text-xl"><i class="ph-fill ph-path text-blueAccent text-3xl"></i> Hành trình phấn đấu</h3>
                             <div class="relative w-full pt-8 pb-10 px-6 md:px-12">
                                 <div class="absolute top-1/2 left-6 md:left-12 right-6 md:right-12 h-3.5 bg-slate-100 -translate-y-1/2 rounded-full border border-slate-200 shadow-inner"></div>
-                                <div class="absolute top-1/2 left-6 md:left-12 h-3.5 bg-gradient-to-r from-blue-400 to-blueAccent -translate-y-1/2 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.3)]" style="width: calc(${progressPercent}% * 0.9)"></div>
+                                <div class="absolute top-1/2 left-6 md:left-12 h-3.5 bg-gradient-to-r from-blue-400 to-blueAccent -translate-y-1/2 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.3)]" style="width: calc(${escapeHtmlText(progressPercent)}% * 0.9)"></div>
                                 ${milestones.map((m) => {
                                     const isReached = currentPoints >= m; const leftPos = (m / maxPoints) * 100;
                                     return `
-                                        <div class="absolute top-1/2 -translate-y-1/2 flex flex-col items-center transform -translate-x-1/2" style="left: calc(${leftPos}% - 10px)">
+                                        <div class="absolute top-1/2 -translate-y-1/2 flex flex-col items-center transform -translate-x-1/2" style="left: calc(${escapeHtmlText(leftPos)}% - 10px)">
                                             <div class="w-12 h-12 md:w-14 md:h-14 rounded-full border-4 ${isReached ? 'border-blueAccent bg-white text-blueAccent shadow-lg scale-110' : 'border-slate-200 bg-slate-50 text-slate-300'} flex items-center justify-center font-black text-xl md:text-2xl z-10 transition-transform">${isReached ? '<i class="ph-fill ph-star"></i>' : '<i class="ph-fill ph-lock-key"></i>'}</div>
                                             <div class="absolute top-16 md:top-20 text-[10px] md:text-xs font-bold ${isReached ? 'text-slate-700 bg-slate-50 border border-slate-200' : 'text-slate-400 bg-transparent'} px-2.5 py-1 rounded-lg">${m} đ</div>
                                         </div>
@@ -6269,7 +6244,7 @@ window.performDirectLookup = function() {
             return "Ổn định";
           })();
           const cardStyles = ["bg-blue-50 text-blue-600","bg-emerald-50 text-emerald-700","bg-rose-50 text-rose-600","bg-amber-50 text-amber-700","bg-indigo-50 text-indigo-700"];
-          const cards = [["📊 Điểm trung bình",avg],["🏆 Điểm cao nhất",max],["📉 Điểm thấp nhất",min],["📝 Tổng số bài",rows.length],["📈 Xu hướng học tập",trend]].map((x,i) => `<div class="${cardStyles[i]} rounded-2xl p-4"><div class="text-xs font-bold opacity-70">${x[0]}</div><div class="text-2xl font-black mt-1">${x[1]}</div></div>`).join("");
+          const cards = [["📊 Điểm trung bình",avg],["🏆 Điểm cao nhất",max],["📉 Điểm thấp nhất",min],["📝 Tổng số bài",rows.length],["📈 Xu hướng học tập",trend]].map((x,i) => `<div class="${escapeHtmlText(cardStyles[i])} rounded-2xl p-4"><div class="text-xs font-bold opacity-70">${escapeHtmlText(x[0])}</div><div class="text-2xl font-black mt-1">${escapeHtmlText(x[1])}</div></div>`).join("");
           const chart = rows.length ? (() => {
             const width = 860, height = 322, left = 48, right = 24, top = 48, bottom = 76;
             const plotWidth = width - left - right, plotHeight = height - top - bottom;
@@ -6284,11 +6259,11 @@ window.performDirectLookup = function() {
             const trendY = (value) => meanY + slope * (value - meanX);
             const grid = Array.from({ length: 11 }, (_, value) => {
               const py = y(value);
-              return `<line x1="${left}" y1="${py}" x2="${width - right}" y2="${py}" stroke="#e2e8f0" stroke-width="1"/><text x="${left - 10}" y="${py + 4}" text-anchor="end" fill="#64748b" font-size="12">${value}</text>`;
+              return `<line x1="${escapeHtmlText(left)}" y1="${escapeHtmlText(py)}" x2="${width - right}" y2="${escapeHtmlText(py)}" stroke="#e2e8f0" stroke-width="1"/><text x="${left - 10}" y="${py + 4}" text-anchor="end" fill="#64748b" font-size="12">${value}</text>`;
             }).join("");
-            const labels = points.map((point, index) => { const label = point.row.date || "Bài " + (index + 1); return `<text x="${point.x}" y="${height - 48}" text-anchor="end" transform="rotate(-45 ${point.x} ${height - 48})" fill="#64748b" font-size="10">${label}</text>`; }).join("");
-            const dots = points.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="#4f7ff0"/>`).join("");
-            return `<style>@media (min-width:768px){#parent-view-modal .grid.grid-cols-2.md\\:grid-cols-4{grid-template-columns:repeat(5,minmax(0,1fr))!important;}}</style><div class="w-full h-72"><svg viewBox="0 0 ${width} ${height}" class="w-full h-full" role="img" aria-label="Biểu đồ điểm ${subject}"><text x="${width / 2}" y="24" text-anchor="middle" fill="#102a56" font-size="20" font-weight="700">Biểu đồ thống kê môn ${subject}</text><text x="${width / 2}" y="41" text-anchor="middle" fill="#94a3b8" font-size="11">Điểm học sinh và xu hướng học tập</text>${grid}<line x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${points[0].x}" y1="${trendY(points[0].x)}" x2="${points[points.length - 1].x}" y2="${trendY(points[points.length - 1].x)}" stroke="#75ad77" stroke-width="3" stroke-dasharray="7 6"/><polyline points="${scoreLine}" fill="none" stroke="#4f7ff0" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}${labels}<rect x="${width / 2 - 116}" y="52" width="16" height="10" rx="2" fill="#4f7ff0"/><text x="${width / 2 - 94}" y="61" fill="#475569" font-size="11">Điểm học sinh</text><line x1="${width / 2 + 26}" y1="57" x2="${width / 2 + 48}" y2="57" stroke="#75ad77" stroke-width="3" stroke-dasharray="6 5"/><text x="${width / 2 + 55}" y="61" fill="#475569" font-size="11">Xu hướng</text></svg></div>`;
+            const labels = points.map((point, index) => { const label = point.row.date || "Bài " + (index + 1); return `<text x="${escapeHtmlText(point.x)}" y="${height - 48}" text-anchor="end" transform="rotate(-45 ${escapeHtmlText(point.x)} ${height - 48})" fill="#64748b" font-size="10">${label}</text>`; }).join("");
+            const dots = points.map((point) => `<circle cx="${escapeHtmlText(point.x)}" cy="${escapeHtmlText(point.y)}" r="4.5" fill="#4f7ff0"/>`).join("");
+            return `<style>@media (min-width:768px){#parent-view-modal .grid.grid-cols-2.md\\:grid-cols-4{grid-template-columns:repeat(5,minmax(0,1fr))!important;}}</style><div class="w-full h-72"><svg viewBox="0 0 ${escapeHtmlText(width)} ${escapeHtmlText(height)}" class="w-full h-full" role="img" aria-label="Biểu đồ điểm ${escapeHtmlText(subject)}"><text x="${width / 2}" y="24" text-anchor="middle" fill="#102a56" font-size="20" font-weight="700">Biểu đồ thống kê môn ${subject}</text><text x="${width / 2}" y="41" text-anchor="middle" fill="#94a3b8" font-size="11">Điểm học sinh và xu hướng học tập</text>${grid}<line x1="${escapeHtmlText(left)}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${escapeHtmlText(left)}" y1="${escapeHtmlText(top)}" x2="${escapeHtmlText(left)}" y2="${top + plotHeight}" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${escapeHtmlText(points[0].x)}" y1="${trendY(points[0].x)}" x2="${escapeHtmlText(points[points.length - 1].x)}" y2="${trendY(points[points.length - 1].x)}" stroke="#75ad77" stroke-width="3" stroke-dasharray="7 6"/><polyline points="${escapeHtmlText(scoreLine)}" fill="none" stroke="#4f7ff0" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}${labels}<rect x="${width / 2 - 116}" y="52" width="16" height="10" rx="2" fill="#4f7ff0"/><text x="${width / 2 - 94}" y="61" fill="#475569" font-size="11">Điểm học sinh</text><line x1="${width / 2 + 26}" y1="57" x2="${width / 2 + 48}" y2="57" stroke="#75ad77" stroke-width="3" stroke-dasharray="6 5"/><text x="${width / 2 + 55}" y="61" fill="#475569" font-size="11">Xu hướng</text></svg></div>`;
           })() : '<div class="w-full py-12 px-4 text-center"><div class="mx-auto w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3"><i class="ph-bold ph-chart-line-down text-2xl"></i></div><p class="font-bold text-slate-600">Chưa có điểm môn ' + escapeHtmlText(subject) + '</p><p class="text-sm text-slate-400 mt-1">Kết quả sẽ hiển thị sau khi giáo viên cập nhật dữ liệu.</p></div>';
           const table = rows.length ? rows.map((x,i) => {
             const rawAverage = x.classAverage;
@@ -6297,7 +6272,7 @@ window.performDirectLookup = function() {
             const testNumber = Number(x.testNumber || String(x.testCode || "").match(/_BAI_(\d+)$/i)?.[1]);
             const testLabel = Number.isInteger(testNumber) && testNumber > 0 ? "Bài " + testNumber : "Bài " + (i + 1);
             const note = x.note ? escapeHtmlText(x.note) : "--";
-            return `<tr class="border-b border-slate-100"><td class="p-3">${x.date || "--"}</td><td class="p-3 font-bold">${escapeHtmlAttr(x.title)} <span class="text-slate-400 text-xs">(${testLabel})</span></td><td class="p-3 text-center font-black text-blueAccent">${x.score}</td><td class="p-3 text-center font-bold">${ca}</td><td class="p-3 whitespace-pre-line">${note}</td></tr>`;
+            return `<tr class="border-b border-slate-100"><td class="p-3">${x.date || "--"}</td><td class="p-3 font-bold">${escapeHtmlAttr(x.title)} <span class="text-slate-400 text-xs">(${testLabel})</span></td><td class="p-3 text-center font-black text-blueAccent">${escapeHtmlText(x.score)}</td><td class="p-3 text-center font-bold">${ca}</td><td class="p-3 whitespace-pre-line">${note}</td></tr>`;
           }).join("") : '<tr><td colspan="5" class="p-8 text-center text-slate-400">Chưa có dữ liệu điểm.</td></tr>';
           const latestTeacherComment = (state.teacherComments || [])
             .filter(item => String(item.studentCode || "").trim() === studentCode)
@@ -6316,7 +6291,7 @@ window.performDirectLookup = function() {
             ? '<section class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200"><h3 class="font-black text-lg md:text-xl text-slate-800 flex items-center gap-3 mb-5"><span class="w-10 h-10 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center"><i class="ph-bold ph-user-check text-xl"></i></span> CHUYÊN CẦN</h3><div class="flex flex-col lg:flex-row items-center justify-between gap-6"><div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 w-full lg:flex-1"><div class="bg-slate-50 rounded-2xl p-4"><div class="text-xs font-bold text-slate-400">Tổng số buổi</div><div class="text-2xl font-black text-slate-800 mt-1">' + totalSessions + '</div></div><div class="bg-emerald-50 rounded-2xl p-4"><div class="text-xs font-bold text-emerald-700/70">Có mặt</div><div class="text-2xl font-black text-emerald-600 mt-1">' + presentSessions + '</div></div><div class="bg-amber-50 rounded-2xl p-4"><div class="text-xs font-bold text-amber-700/70">Đi muộn</div><div class="text-2xl font-black text-amber-600 mt-1">' + lateSessions + '</div></div><div class="bg-blue-50 rounded-2xl p-4"><div class="text-xs font-bold text-blue-700/70">Vắng có phép</div><div class="text-2xl font-black text-blue-600 mt-1">' + excusedSessions + '</div></div><div class="bg-rose-50 rounded-2xl p-4"><div class="text-xs font-bold text-rose-700/70">Vắng không phép</div><div class="text-2xl font-black text-rose-600 mt-1">' + unexcusedSessions + '</div></div></div><div class="shrink-0 w-36 h-36 md:w-40 md:h-40 rounded-full flex items-center justify-center" style="background:conic-gradient(#3b6ee8 ' + (attendanceRate * 3.6) + 'deg, #e8eefc 0deg)"><div class="w-24 h-24 md:w-28 md:h-28 rounded-full bg-white flex flex-col items-center justify-center shadow-inner"><div class="text-3xl font-black text-blue-700">' + attendanceRate + '%</div><div class="text-[10px] font-bold text-slate-400">Tỷ lệ chuyên cần</div></div></div></div></section>'
             : '<section class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200 text-center"><div class="mx-auto w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3"><i class="ph-bold ph-calendar-x text-2xl"></i></div><h3 class="font-black text-slate-700">Chưa có dữ liệu chuyên cần</h3><p class="text-sm text-slate-400 mt-1">Thông tin điểm danh sẽ xuất hiện sau khi giáo viên cập nhật.</p></section>';
           window.parentChartData = { rows, subject };
-          document.getElementById("modal-container").innerHTML = `<div class="fixed inset-0 z-[100] bg-slate-50 overflow-y-auto" id="parent-view-modal"><div class="sticky top-0 bg-primary text-white p-3 md:p-5 flex justify-between items-center gap-3 z-10 shadow-lg"><div class="min-w-0"><div class="font-black text-base md:text-lg">HỒ SƠ HỌC TẬP</div><div class="text-[11px] md:text-xs text-blue-100 truncate">${escapeHtmlAttr(student.name)} · ${escapeHtmlAttr(state.admin.className)}</div></div><button onclick="${closeAction}" class="shrink-0 px-4 md:px-5 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition-colors">Đóng</button></div><main class="max-w-5xl mx-auto p-3 sm:p-4 md:p-8 space-y-4 md:space-y-6"><div class="flex justify-center"><span class="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-100 px-3 py-2 text-xs font-bold text-blue-700"><i class="ph-bold ph-clock"></i> ${escapeHtmlText(updatedAtText)}</span></div><div class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200 flex flex-col md:flex-row justify-between gap-4"><div><h2 class="text-2xl font-black text-slate-800">${escapeHtmlAttr(student.name)}</h2><p class="text-sm text-slate-500 mt-1">Mã HS: ${studentCode}</p></div><div class="bg-blue-50 text-blue-900 rounded-2xl p-4 text-sm leading-7"><b class="block text-base">MỤC TIÊU</b><b>Khối thi: ${escapeHtmlAttr(student.khoiThi || "A00")}</b><br><b>Tổng điểm: ${escapeHtmlAttr(String(student.tongDiemMucTieu || 26))}</b></div></div><div class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200"><div class="flex justify-between gap-4 flex-wrap mb-5"><h3 class="font-black text-xl text-slate-800">Kết quả học tập</h3><select onchange="changeParentSubject(this.value, ${toInlineJsValue(student.id)})" class="border border-slate-200 rounded-xl px-4 py-2 font-bold">${subjects.map(s=>`<option ${s===subject?'selected':''}>${s}</option>`).join("")}</select></div><div class="border border-slate-100 rounded-2xl p-5"><div class="flex items-end gap-3 min-h-52">${chart}</div></div><div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">${cards}</div></div><div class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200 overflow-x-auto"><h3 class="font-black text-xl text-slate-800 mb-4">Bảng điểm môn ${subject}</h3><table class="w-full min-w-[650px] text-sm"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-3 text-left">Ngày</th><th class="p-3 text-left">Tên bài kiểm tra</th><th class="p-3">Điểm</th><th class="p-3">Điểm TB lớp</th><th class="p-3 text-left">Ghi chú</th></tr></thead><tbody>${table}</tbody></table></div></main></div>`;
+          document.getElementById("modal-container").innerHTML = `<div class="fixed inset-0 z-[100] bg-slate-50 overflow-y-auto" id="parent-view-modal"><div class="sticky top-0 bg-primary text-white p-3 md:p-5 flex justify-between items-center gap-3 z-10 shadow-lg"><div class="min-w-0"><div class="font-black text-base md:text-lg">HỒ SƠ HỌC TẬP</div><div class="text-[11px] md:text-xs text-blue-100 truncate">${escapeHtmlAttr(student.name)} · ${escapeHtmlAttr(state.admin.className)}</div></div><button onclick="${toInlineJsValue(closeAction)}" class="shrink-0 px-4 md:px-5 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition-colors">Đóng</button></div><main class="max-w-5xl mx-auto p-3 sm:p-4 md:p-8 space-y-4 md:space-y-6"><div class="flex justify-center"><span class="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-100 px-3 py-2 text-xs font-bold text-blue-700"><i class="ph-bold ph-clock"></i> ${escapeHtmlText(updatedAtText)}</span></div><div class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200 flex flex-col md:flex-row justify-between gap-4"><div><h2 class="text-2xl font-black text-slate-800">${escapeHtmlAttr(student.name)}</h2><p class="text-sm text-slate-500 mt-1">Mã HS: ${studentCode}</p></div><div class="bg-blue-50 text-blue-900 rounded-2xl p-4 text-sm leading-7"><b class="block text-base">MỤC TIÊU</b><b>Khối thi: ${escapeHtmlAttr(student.khoiThi || "A00")}</b><br><b>Tổng điểm: ${escapeHtmlAttr(String(student.tongDiemMucTieu || 26))}</b></div></div><div class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200"><div class="flex justify-between gap-4 flex-wrap mb-5"><h3 class="font-black text-xl text-slate-800">Kết quả học tập</h3><select onchange="changeParentSubject(this.value, ${toInlineJsValue(student.id)})" class="border border-slate-200 rounded-xl px-4 py-2 font-bold">${subjects.map(s=>`<option ${s===subject?'selected':''}>${s}</option>`).join("")}</select></div><div class="border border-slate-100 rounded-2xl p-5"><div class="flex items-end gap-3 min-h-52">${chart}</div></div><div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">${cards}</div></div><div class="bg-white rounded-3xl p-4 md:p-6 border border-slate-200 overflow-x-auto"><h3 class="font-black text-xl text-slate-800 mb-4">Bảng điểm môn ${subject}</h3><table class="w-full min-w-[650px] text-sm"><thead class="bg-slate-50 text-slate-500"><tr><th class="p-3 text-left">Ngày</th><th class="p-3 text-left">Tên bài kiểm tra</th><th class="p-3">Điểm</th><th class="p-3">Điểm TB lớp</th><th class="p-3 text-left">Ghi chú</th></tr></thead><tbody>${table}</tbody></table></div></main></div>`;
           const parentMain = document.querySelector("#parent-view-modal main");
           if (parentMain) {
             const academicSection = parentMain.children[1];
@@ -6364,8 +6339,8 @@ window.performDirectLookup = function() {
             ];
 
             const colorBtnsHtml = colors.map(c => `
-                <button onclick="document.getElementById('edit-theme-color').value='${c.val}'; document.querySelectorAll('.banner-color-btn').forEach(b => b.classList.remove('ring-4', 'ring-white', 'shadow-lg', 'scale-110')); this.classList.add('ring-4', 'ring-white', 'shadow-lg', 'scale-110');" 
-                        class="h-12 rounded-xl bg-gradient-to-br ${c.val} shadow-sm transition-all banner-color-btn ${currentColor === c.val ? 'ring-4 ring-white shadow-lg scale-110' : 'hover:scale-105 border border-slate-200'}"></button>
+                <button onclick="document.getElementById('edit-theme-color').value='${escapeInlineJs(c.val)}'; document.querySelectorAll('.banner-color-btn').forEach(b => b.classList.remove('ring-4', 'ring-white', 'shadow-lg', 'scale-110')); this.classList.add('ring-4', 'ring-white', 'shadow-lg', 'scale-110');"
+                        class="h-12 rounded-xl bg-gradient-to-br ${escapeHtmlText(c.val)} shadow-sm transition-all banner-color-btn ${currentColor === c.val ? 'ring-4 ring-white shadow-lg scale-110' : 'hover:scale-105 border border-slate-200'}"></button>
             `).join('');
 
             document.getElementById('modal-container').innerHTML = `
@@ -6378,13 +6353,13 @@ window.performDirectLookup = function() {
                             <div>
                                 <label class="block text-[11px] font-bold text-slate-500 mb-3 uppercase tracking-widest">Giao diện Màu nền</label>
                                 <div class="grid grid-cols-4 sm:grid-cols-7 gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">${colorBtnsHtml}</div>
-                                <input type="hidden" id="edit-theme-color" value="${currentColor}">
+                                <input type="hidden" id="edit-theme-color" value="${escapeHtmlText(currentColor)}">
                             </div>
                             <div>
                                 <label class="block text-[11px] font-bold text-slate-500 mb-3 uppercase tracking-widest">Hoặc dùng Ảnh nền (Tùy chọn)</label>
                                 <div class="relative cursor-pointer group mb-2" onclick="document.getElementById('edit-theme-banner-upload').click()">
                                     <div id="banner-preview-container" class="w-full h-36 rounded-2xl bg-slate-100 flex items-center justify-center shadow-inner overflow-hidden border-2 border-dashed border-slate-300 group-hover:border-blueAccent transition-colors relative">
-                                        ${state.theme.bannerUrl ? `<img src="${state.theme.bannerUrl}" class="w-full h-full object-cover">` : `<div class="flex flex-col items-center gap-2"><i class="ph-fill ph-image text-4xl text-slate-300"></i><span class="text-xs font-bold text-slate-400">Bấm để chọn ảnh</span></div>`}
+                                        ${state.theme.bannerUrl ? `<img src="${safeImageUrl(state.theme.bannerUrl)}" class="w-full h-full object-cover">` : `<div class="flex flex-col items-center gap-2"><i class="ph-fill ph-image text-4xl text-slate-300"></i><span class="text-xs font-bold text-slate-400">Bấm để chọn ảnh</span></div>`}
                                     </div>
                                     <input type="file" id="edit-theme-banner-upload" class="hidden" accept="image/*" onchange="handleBannerUpload(event)">
                                 </div>
@@ -6403,7 +6378,7 @@ window.performDirectLookup = function() {
             compressImage(file, (dataUrl) => {
                 document.getElementById('edit-theme-banner').value = dataUrl;
                 const preview = document.getElementById('banner-preview-container');
-                if (preview) preview.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover rounded-2xl"><div class="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><i class="ph-bold ph-upload-simple text-white text-3xl mb-2"></i><span class="text-white text-sm font-bold">Thay ảnh khác</span></div>`;
+                if (preview) preview.innerHTML = `<img src="${safeImageUrl(dataUrl)}" class="w-full h-full object-cover rounded-2xl"><div class="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><i class="ph-bold ph-upload-simple text-white text-3xl mb-2"></i><span class="text-white text-sm font-bold">Thay ảnh khác</span></div>`;
             }, 1200, 0.8);
         }
 
@@ -6446,21 +6421,21 @@ window.performDirectLookup = function() {
                             <div class="absolute top-10 left-[23px] bottom-0 w-[2px] bg-slate-200 group-last:bg-transparent"></div>
                             
                             <!-- Icon -->
-                            <div class="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 z-10 shadow-sm border ${colorTheme.border} ${colorTheme.bg} ${colorTheme.text}">
-                                <i class="ph-bold ${colorTheme.icon} text-xl"></i>
+                            <div class="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 z-10 shadow-sm border ${escapeHtmlText(colorTheme.border)} ${escapeHtmlText(colorTheme.bg)} ${escapeHtmlText(colorTheme.text)}">
+                                <i class="ph-bold ${escapeHtmlText(colorTheme.icon)} text-xl"></i>
                             </div>
                             
                             <!-- Nội dung -->
                             <div class="flex-1 bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all hover:-translate-y-1 relative">
                                 
                                 <!-- Nút Xóa LUÔN HIỆN -->
-                                <button onclick="deleteHistoryRecord(${toInlineJsValue(student.id)}, ${toInlineJsValue(h.id)})" class="absolute -top-3 -right-3 bg-white border border-red-200 text-red-400 hover:bg-red-500 hover:text-white rounded-full w-8 h-8 flex items-center justify-center transition-all shadow-md z-20" title="Xóa & Hoàn tác điểm">
+                                <button onclick="deleteHistoryRecord(${toInlineJsValue(student.id)}, ${toInlineJsValue(h.id)})" class="absolute -top-3 -right-3 bg-white border border-red-200 text-red-400 hover:bg-red-500 hover:text-white rounded-full w-8 h-8 flex items-center justify-center transition-all shadow-md z-20" title="Hoàn tác điểm, giữ lịch sử">
                                     <i class="ph-bold ph-trash text-sm"></i>
                                 </button>
                                 
                                 <div class="flex justify-between items-start gap-4 mb-2">
-                                    <div class="font-bold text-slate-800 text-base leading-tight pr-6">${h.reason}</div>
-                                    <div class="font-black text-xl flex-shrink-0 ${colorTheme.text} bg-white px-2 py-0.5 rounded-lg border ${colorTheme.border} shadow-sm">${colorTheme.sign}${h.points}</div>
+                                    <div class="font-bold text-slate-800 text-base leading-tight pr-6">${escapeHtmlText(h.reason)}</div>
+                                    <div class="font-black text-xl flex-shrink-0 ${escapeHtmlText(colorTheme.text)} bg-white px-2 py-0.5 rounded-lg border ${escapeHtmlText(colorTheme.border)} shadow-sm">${escapeHtmlText(colorTheme.sign)}${escapeHtmlText(h.points)}</div>
                                 </div>
                                 <div class="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
                                     <i class="ph-fill ph-clock"></i> ${timeStr} <span class="mx-1">•</span> <i class="ph-fill ph-calendar-blank"></i> ${dateStr}
@@ -6484,13 +6459,13 @@ window.performDirectLookup = function() {
                             <div class="flex items-center gap-5">
                                 ${getAvatarImg(student.avatarUrl, student.name, "w-16 h-16 ring-4 ring-slate-50 shadow-md")}
                                 <div>
-                                    <div class="font-black text-slate-800 text-2xl tracking-tight mb-1">${student.name}</div>
-                                    <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-100 px-3 py-1 rounded-lg inline-block border border-slate-200">${student.group}</div>
+                                    <div class="font-black text-slate-800 text-2xl tracking-tight mb-1">${escapeHtmlText(student.name)}</div>
+                                    <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-100 px-3 py-1 rounded-lg inline-block border border-slate-200">${escapeHtmlText(student.group)}</div>
                                 </div>
                             </div>
                             <div class="text-right">
                                 <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">TỔNG ĐIỂM HIỆN TẠI</div>
-                                <div class="text-3xl font-black text-blue-500">${student.points}</div>
+                                <div class="text-3xl font-black text-blue-500">${escapeHtmlText(student.points)}</div>
                             </div>
                         </div>
                         <!-- Timeline -->
@@ -6616,7 +6591,7 @@ window.openJourneyModal = function() {
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-widest">Ngày ghi nhận</label>
-                            <input type="date" id="journey-date" value="${today}" class="w-full px-4 py-3.5 bg-white border border-slate-300 rounded-xl text-sm font-bold focus:border-emerald-500 cursor-pointer outline-none">
+                            <input type="date" id="journey-date" value="${escapeHtmlText(today)}" class="w-full px-4 py-3.5 bg-white border border-slate-300 rounded-xl text-sm font-bold focus:border-emerald-500 cursor-pointer outline-none">
                         </div>
                         <div>
                             <label class="block text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-widest">Biểu tượng</label>
@@ -6705,7 +6680,7 @@ window.handleGroupAvatarUpload = function(event) {
         // Hiển thị ảnh xem trước ngay lập tức trên Form
         const previewContainer = document.getElementById('group-avatar-preview-container');
         if(previewContainer) {
-            previewContainer.innerHTML = `<img src="${dataUrl}" class="w-28 h-28 rounded-3xl mx-auto object-cover shadow-lg ring-4 ring-white">`;
+            previewContainer.innerHTML = `<img src="${safeImageUrl(dataUrl)}" class="w-28 h-28 rounded-3xl mx-auto object-cover shadow-lg ring-4 ring-white">`;
         }
     }, 300, 0.8);
 };
@@ -6720,7 +6695,7 @@ window.handleAdminAvatarUpload = function(event) {
         
         const previewContainer = document.getElementById('edit-admin-avatar-preview');
         if(previewContainer) {
-            previewContainer.innerHTML = `<img src="${dataUrl}" class="w-32 h-32 rounded-full object-cover ring-4 ring-white shadow-xl mx-auto">`;
+            previewContainer.innerHTML = `<img src="${safeImageUrl(dataUrl)}" class="w-32 h-32 rounded-full object-cover ring-4 ring-white shadow-xl mx-auto">`;
         }
     }, 300, 0.8);
 };
@@ -7009,6 +6984,12 @@ window.playBellSound = function(idx = 0) {
 // ==========================================
         // --- TÍNH NĂNG QUẢN LÝ THỜI KHÓA BIỂU ---
         // ==========================================
+        function safeTimetableHtml(html) {
+            const parsed=new DOMParser().parseFromString(String(html||''),'text/html'),out=document.createElement('div');
+            const allowed=new Set(['TABLE','THEAD','TBODY','TFOOT','TR','TH','TD','CAPTION','COLGROUP','COL','BR']);
+            function copy(node,parent){if(node.nodeType===3){parent.appendChild(document.createTextNode(node.textContent));return;}if(node.nodeType!==1)return;if(['SCRIPT','STYLE','IFRAME','OBJECT','SVG','MATH','FORM','INPUT','IMG'].includes(node.tagName))return;const target=allowed.has(node.tagName)?document.createElement(node.tagName.toLowerCase()):parent;if(target!==parent){for(const attr of ['colspan','rowspan']){const value=node.getAttribute(attr);if(value&&/^\d{1,3}$/.test(value))target.setAttribute(attr,value);}parent.appendChild(target);}node.childNodes.forEach(child=>copy(child,target));}
+            parsed.body.childNodes.forEach(node=>copy(node,out));return out.innerHTML;
+        }
         function renderViewThoiKhoaBieu() {
             if (!state.timetable) state.timetable = { dayHtml: '', extraHtml: '' };
             
@@ -7028,11 +7009,11 @@ window.playBellSound = function(idx = 0) {
                 todayClassesHtml = todayClasses.map(c => `
                     <div class="bg-[#1e2343] hover:bg-[#282d52] transition-colors rounded-2xl p-4 min-w-[180px] border border-blue-400/20 shadow-sm">
                         <div class="flex justify-between items-center text-blue-200 text-[11px] font-bold mb-3">
-                            <span>${c.period}</span>
-                            <span class="flex items-center gap-1"><i class="ph-bold ph-clock"></i> ${c.time}</span>
+                            <span>${escapeHtmlText(c.period)}</span>
+                            <span class="flex items-center gap-1"><i class="ph-bold ph-clock"></i> ${escapeHtmlText(c.time)}</span>
                         </div>
-                        <div class="text-white font-black text-xl mb-1.5">${c.subject}</div>
-                        <div class="text-blue-300 text-[10px] font-bold uppercase tracking-widest">GV: ${c.teacher}</div>
+                        <div class="text-white font-black text-xl mb-1.5">${escapeHtmlText(c.subject)}</div>
+                        <div class="text-blue-300 text-[10px] font-bold uppercase tracking-widest">GV: ${escapeHtmlText(c.teacher)}</div>
                     </div>
                 `).join('');
             }
@@ -7047,15 +7028,15 @@ window.playBellSound = function(idx = 0) {
 
           // --- KHUNG UPLOAD EXCEL ---
             const renderUploadSection = (type, title, icon, htmlKey) => {
-                const tableHtml = state.timetable[htmlKey];
+                const tableHtml = safeTimetableHtml(state.timetable[htmlKey]);
                 return `
                     <div class="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100 flex flex-col h-full">
                         <div class="flex justify-between items-center mb-6">
-                            <h3 class="font-black text-lg md:text-xl text-slate-800 flex items-center gap-2"><i class="ph-fill ${icon} text-blueAccent"></i> ${title}</h3>
-                            <button onclick="document.getElementById('upload-tb-${type}').click()" class="text-xs font-bold bg-blue-50 text-blueAccent px-4 py-2.5 rounded-xl hover:bg-blue-100 transition-colors shadow-sm border border-blue-100 flex items-center gap-2">
+                            <h3 class="font-black text-lg md:text-xl text-slate-800 flex items-center gap-2"><i class="ph-fill ${escapeHtmlText(icon)} text-blueAccent"></i> ${title}</h3>
+                            <button onclick="document.getElementById('upload-tb-${escapeInlineJs(type)}').click()" class="text-xs font-bold bg-blue-50 text-blueAccent px-4 py-2.5 rounded-xl hover:bg-blue-100 transition-colors shadow-sm border border-blue-100 flex items-center gap-2">
                                 <i class="ph-bold ph-file-xls"></i> Tải File Excel
                             </button>
-                            <input type="file" id="upload-tb-${type}" class="hidden" accept=".xlsx, .xls" onchange="handleTimetableExcelUpload(event, '${htmlKey}')">
+                            <input type="file" id="upload-tb-${escapeHtmlText(type)}" class="hidden" accept=".xlsx, .xls" onchange="handleTimetableExcelUpload(event, '${escapeInlineJs(htmlKey)}')">
                         </div>
                         <div class="flex-1 bg-slate-50/50 rounded-[1.5rem] border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden relative group min-h-[400px]">
                             ${tableHtml 
@@ -7102,7 +7083,7 @@ window.playBellSound = function(idx = 0) {
                                        ${tableHtml}
                                    </div>
                                    <div class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-[1.5rem]">
-                                        <button onclick="document.getElementById('upload-tb-${type}').click()" class="bg-white text-slate-800 font-bold px-6 py-3 rounded-xl shadow-lg flex items-center gap-2 transform hover:scale-105 transition-transform"><i class="ph-bold ph-arrows-clockwise text-xl"></i> Tải file Excel khác</button>
+                                        <button onclick="document.getElementById('upload-tb-${escapeInlineJs(type)}').click()" class="bg-white text-slate-800 font-bold px-6 py-3 rounded-xl shadow-lg flex items-center gap-2 transform hover:scale-105 transition-transform"><i class="ph-bold ph-arrows-clockwise text-xl"></i> Tải file Excel khác</button>
                                    </div>` 
                                 : `<div class="text-center text-slate-400 p-8 flex flex-col items-center">
                                         <i class="ph-fill ph-file-xls text-6xl mb-4 text-slate-300"></i>
@@ -7161,7 +7142,7 @@ window.playBellSound = function(idx = 0) {
                     // 1. Chuyển Sheet thành HTML Table để hiển thị dưới giao diện
                     const htmlTable = XLSX.utils.sheet_to_html(worksheet, { id: 'tkb-table', editable: false });
                     if (!state.timetable) state.timetable = {};
-                    state.timetable[htmlKey] = htmlTable;
+                    state.timetable[htmlKey] = safeTimetableHtml(htmlTable);
 
                     // 2. Trích xuất mảng để bóc tách lịch các ngày
                     const rows = XLSX.utils.sheet_to_json(worksheet, {header: 1});
@@ -7318,20 +7299,7 @@ window.playBellSound = function(idx = 0) {
             
             const pointsToApply = type === 'add' ? points : -points;
             
-            // BỎ Math.max ĐỂ CHO PHÉP TỔNG ĐIỂM ÂM
-            student.points = (student.points || 0) + pointsToApply; 
-            
-            // Điểm Sao dùng để đổi quà nên em vẫn giữ tối thiểu là 0 (để không bị nợ Sao trong cửa hàng)
-            student.stars = Math.max(0, (student.stars || 0) + pointsToApply);
-            
-            if (!student.history) student.history = [];
-            student.history.push({
-                id: Date.now(),
-                date: new Date().toISOString(),
-                points: pointsToApply,
-                reason: reason + ` [${category}]`
-            });
-            
+            recordPointChange(student,pointsToApply,reason+' ['+category+']');
             saveData();
             renderLayout(); // Load lại giao diện sau khi chấm xong
             
@@ -7468,7 +7436,7 @@ window.playBellSound = function(idx = 0) {
                 if (state.hiddenSeats.includes(seatId)) {
                     seatsHtml += `
                         <div class="h-28 rounded-2xl flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity group relative">
-                            <button onclick="restoreSeat(event, '${seatId}')" class="bg-white text-emerald-500 w-8 h-8 rounded-full flex items-center justify-center hover:bg-emerald-50 hover:scale-110 transition-all shadow-md border border-emerald-100" title="Khôi phục lại ghế này">
+                            <button onclick="restoreSeat(event, '${escapeInlineJs(seatId)}')" class="bg-white text-emerald-500 w-8 h-8 rounded-full flex items-center justify-center hover:bg-emerald-50 hover:scale-110 transition-all shadow-md border border-emerald-100" title="Khôi phục lại ghế này">
                                 <i class="ph-bold ph-plus text-sm"></i>
                             </button>
                         </div>
@@ -7488,13 +7456,13 @@ window.playBellSound = function(idx = 0) {
                         let hoverClass = student.gender === 'Nữ' ? 'hover:border-pink-300 hover:shadow-[0_8px_20px_rgba(244,114,182,0.15)]' : 'hover:border-blue-300 hover:shadow-[0_8px_20px_rgba(59,130,246,0.15)]';
                         
                         seatsHtml += `
-                            <div class="h-28 bg-white border ${borderColor} rounded-2xl shadow-sm ${hoverClass} relative group cursor-grab flex flex-col items-center justify-center transition-all duration-300 transform hover:-translate-y-1 overflow-hidden" draggable="true" ondragstart="onDragStartStudent(event, ${toInlineJsValue(student.id)})" ondragend="onDragEndStudent(event)">
-                                <div class="absolute top-0 left-0 w-full h-1.5 ${topBar} opacity-80"></div>
-                                <button onclick="removeStudentFromSeat(event, '${seatId}')" class="absolute top-2 right-2 bg-slate-50 hover:bg-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10 border border-slate-100 hover:border-red-500 shadow-sm" title="Thu hồi học sinh"><i class="ph-bold ph-x text-[10px]"></i></button>
+                            <div class="h-28 bg-white border ${escapeHtmlText(borderColor)} rounded-2xl shadow-sm ${escapeHtmlText(hoverClass)} relative group cursor-grab flex flex-col items-center justify-center transition-all duration-300 transform hover:-translate-y-1 overflow-hidden" draggable="true" ondragstart="onDragStartStudent(event, ${toInlineJsValue(student.id)})" ondragend="onDragEndStudent(event)">
+                                <div class="absolute top-0 left-0 w-full h-1.5 ${escapeHtmlText(topBar)} opacity-80"></div>
+                                <button onclick="removeStudentFromSeat(event, '${escapeInlineJs(seatId)}')" class="absolute top-2 right-2 bg-slate-50 hover:bg-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10 border border-slate-100 hover:border-red-500 shadow-sm" title="Thu hồi học sinh"><i class="ph-bold ph-x text-[10px]"></i></button>
                                 ${getAvatarImg(student.avatarUrl, student.name, "w-11 h-11 mt-1.5 mb-2 pointer-events-none ring-2 ring-slate-50 shadow-sm")}
                                 <div class="flex items-center gap-1.5 pointer-events-none px-2 w-full justify-center">
-                                    <span class="w-1.5 h-1.5 rounded-full ${dotColor}"></span>
-                                    <span class="text-[11px] font-bold text-slate-700 text-center truncate">${student.name.split(' ').pop()}</span>
+                                    <span class="w-1.5 h-1.5 rounded-full ${escapeHtmlText(dotColor)}"></span>
+                                    <span class="text-[11px] font-bold text-slate-700 text-center truncate">${escapeHtmlText(student.name.split(' ').pop())}</span>
                                 </div>
                             </div>
                         `;
@@ -7506,8 +7474,8 @@ window.playBellSound = function(idx = 0) {
                 // 3. Ghế trống
                 if (!studentId || !state.students.find(s => s.id === studentId)) {
                     seatsHtml += `
-                        <div class="seat-dropzone h-28 bg-white/60 backdrop-blur-sm border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 transition-all cursor-pointer hover:bg-indigo-50/60 hover:border-indigo-300 hover:text-indigo-500 relative group" ondragover="onDragOverSeat(event)" ondragleave="onDragLeaveSeat(event)" ondrop="onDropSeat(event, '${seatId}')">
-                            <button onclick="hideSeat(event, '${seatId}')" class="absolute top-2 right-2 bg-white hover:bg-slate-200 text-slate-400 rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10 shadow-sm border border-slate-100" title="Xóa bỏ ghế này"><i class="ph-bold ph-minus text-[10px]"></i></button>
+                        <div class="seat-dropzone h-28 bg-white/60 backdrop-blur-sm border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-slate-400 transition-all cursor-pointer hover:bg-indigo-50/60 hover:border-indigo-300 hover:text-indigo-500 relative group" ondragover="onDragOverSeat(event)" ondragleave="onDragLeaveSeat(event)" ondrop="onDropSeat(event, '${escapeInlineJs(seatId)}')">
+                            <button onclick="hideSeat(event, '${escapeInlineJs(seatId)}')" class="absolute top-2 right-2 bg-white hover:bg-slate-200 text-slate-400 rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10 shadow-sm border border-slate-100" title="Xóa bỏ ghế này"><i class="ph-bold ph-minus text-[10px]"></i></button>
                             <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center mb-2 group-hover:bg-indigo-100 transition-colors"><i class="ph-bold ph-plus text-lg opacity-50"></i></div>
                             <span class="text-[9px] font-bold uppercase tracking-widest opacity-60">Ghế ${i}</span>
                         </div>
@@ -7522,8 +7490,8 @@ window.playBellSound = function(idx = 0) {
                         <div class="w-5 h-8 flex items-center justify-center opacity-30 group-hover:opacity-100 group-hover:text-indigo-500 transition-colors"><i class="ph-bold ph-dots-six-vertical text-lg"></i></div>
                         ${getAvatarImg(s.avatarUrl, s.name, "w-10 h-10 pointer-events-none ring-2 ring-slate-50 shadow-sm")}
                         <div class="flex-1 min-w-0 pointer-events-none">
-                            <div class="text-sm font-bold text-slate-800 truncate mb-0.5">${s.name}</div>
-                            <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-users text-indigo-400"></i> ${s.group}</div>
+                            <div class="text-sm font-bold text-slate-800 truncate mb-0.5">${escapeHtmlText(s.name)}</div>
+                            <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-users text-indigo-400"></i> ${escapeHtmlText(s.group)}</div>
                         </div>
                     </div>
                 `).join('')
@@ -7586,7 +7554,7 @@ window.playBellSound = function(idx = 0) {
                         <div class="w-full lg:w-[380px] flex-shrink-0 bg-white rounded-[2.5rem] p-7 shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-slate-100 flex flex-col h-[600px] lg:h-auto z-10" ondragover="onDragOverList(event)" ondrop="onDropList(event)">
                             <div class="flex justify-between items-center mb-5">
                                 <h3 class="font-black text-slate-800 uppercase tracking-wide text-base flex items-center gap-2"><i class="ph-fill ph-users-three text-indigo-500 text-xl"></i> DANH SÁCH CHỜ</h3>
-                                <span class="bg-indigo-50 text-indigo-700 text-xs font-black px-3 py-1.5 rounded-xl border border-indigo-100 shadow-sm">${unassignedStudents.length} HS</span>
+                                <span class="bg-indigo-50 text-indigo-700 text-xs font-black px-3 py-1.5 rounded-xl border border-indigo-100 shadow-sm">${escapeHtmlText(unassignedStudents.length)} HS</span>
                             </div>
                             <div class="text-xs text-slate-500 mb-6 font-medium bg-slate-50 p-4 rounded-2xl border border-slate-100 leading-relaxed text-center">
                                 Cầm và kéo học sinh từ đây và thả vào <b class="text-slate-700">Ghế trống</b> bên trái.
@@ -7638,7 +7606,7 @@ window.playBellSound = function(idx = 0) {
                     "Toán", "Văn", "Lý", "Hóa", "Sinh", 
                     "Công nghệ", "Thể dục", "TNHN", "Tin học", 
                     "Lịch Sử", "Anh văn", "Địa lý", "GDCD", "SHDC", "SHCN"
-                ].map(sub => `<option value="${sub}" ${data.subject === sub ? 'selected' : ''}>${sub}</option>`).join('');
+                ].map(sub => `<option value="${escapeHtmlText(sub)}" ${data.subject === sub ? 'selected' : ''}>${sub}</option>`).join('');
 
                 return slots.map(slot => {
                     const key = `${state.activeDay}_${slot.id}`;
@@ -7647,14 +7615,14 @@ window.playBellSound = function(idx = 0) {
                     return `
                         <div class="bg-[#1e2343] border border-blue-400/20 rounded-2xl p-4 shadow-sm hover:border-blue-400/50 transition-all flex flex-col justify-between group relative">
                             <div class="flex justify-between items-center text-blue-200 text-[11px] font-bold mb-3">
-                                <span class="bg-blue-900/60 px-2.5 py-1 rounded-lg border border-blue-400/10">${slot.period}</span>
-                                <span class="flex items-center gap-1 text-slate-300"><i class="ph-bold ph-clock text-amber-400"></i> ${slot.time}</span>
+                                <span class="bg-blue-900/60 px-2.5 py-1 rounded-lg border border-blue-400/10">${escapeHtmlText(slot.period)}</span>
+                                <span class="flex items-center gap-1 text-slate-300"><i class="ph-bold ph-clock text-amber-400"></i> ${escapeHtmlText(slot.time)}</span>
                             </div>
                             
                             <div class="space-y-2 mb-3">
                                 <!-- Ô chọn môn học dạng thả xuống (Dropdown) đồng bộ màu Xanh Navy -->
                                 <div class="relative">
-                                    <select onchange="updateTeachingSlot(${state.activeDay}, '${slot.id}', 'subject', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2.5 text-white font-black text-sm outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
+                                    <select onchange="updateTeachingSlot(${toInlineJsValue(state.activeDay)}, '${escapeInlineJs(slot.id)}', 'subject', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2.5 text-white font-black text-sm outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
                                         <option value="" class="text-slate-400">+ Chọn môn học</option>
                                         ${subjectOptions}
                                     </select>
@@ -7662,7 +7630,7 @@ window.playBellSound = function(idx = 0) {
                                 </div>
 
                                 <!-- Ô nhập tên giáo viên -->
-                                <input type="text" value="${escapeHtmlAttr(data.teacher)}" placeholder="Nhập tên giáo viên..." onchange="updateTeachingSlot(${state.activeDay}, '${slot.id}', 'teacher', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2 text-blue-200 text-xs font-bold outline-none focus:border-amber-400 transition-colors">
+                                <input type="text" value="${escapeHtmlAttr(data.teacher)}" placeholder="Nhập tên giáo viên..." onchange="updateTeachingSlot(${toInlineJsValue(state.activeDay)}, '${escapeInlineJs(slot.id)}', 'teacher', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2 text-blue-200 text-xs font-bold outline-none focus:border-amber-400 transition-colors">
                             </div>
                         </div>
                     `;
@@ -7672,8 +7640,8 @@ window.playBellSound = function(idx = 0) {
             const dayTabsHtml = days.map(day => {
                 const isActive = state.activeDay === day.id;
                 return `
-                    <button onclick="state.activeDay = ${day.id}; renderLayout();" class="px-6 py-3 rounded-2xl text-sm font-black transition-all ${isActive ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
-                        ${day.label} ${day.id === 7 ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">4 Tiết</span>' : ''}
+                    <button onclick="state.activeDay = ${toInlineJsValue(day.id)}; renderLayout();" class="px-6 py-3 rounded-2xl text-sm font-black transition-all ${isActive ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
+                        ${escapeHtmlText(day.label)} ${day.id === 7 ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">4 Tiết</span>' : ''}
                     </button>
                 `;
             }).join('');
@@ -7773,19 +7741,19 @@ window.playBellSound = function(idx = 0) {
                         "Toán", "Văn", "Lý", "Hóa", "Sinh", 
                         "Công nghệ", "Thể dục", "TNHN", "Tin học", 
                         "Lịch Sử", "Anh văn", "Địa lý", "GDCD", "SHDC", "SHCN"
-                    ].map(sub => `<option value="${sub}" ${data.subject === sub ? 'selected' : ''}>${sub}</option>`).join('');
+                    ].map(sub => `<option value="${escapeHtmlText(sub)}" ${data.subject === sub ? 'selected' : ''}>${sub}</option>`).join('');
 
                     return `
                         <div class="bg-[#1e2343] border border-blue-400/20 rounded-2xl p-4 shadow-sm hover:border-blue-400/50 transition-all flex flex-col justify-between group relative">
                             <div class="flex justify-between items-center text-blue-200 text-[11px] font-bold mb-3">
-                                <span class="bg-blue-900/60 px-2.5 py-1 rounded-lg border border-blue-400/10">${slot.period}</span>
-                                <span class="flex items-center gap-1 text-slate-300"><i class="ph-bold ph-clock text-amber-400"></i> ${slot.time}</span>
+                                <span class="bg-blue-900/60 px-2.5 py-1 rounded-lg border border-blue-400/10">${escapeHtmlText(slot.period)}</span>
+                                <span class="flex items-center gap-1 text-slate-300"><i class="ph-bold ph-clock text-amber-400"></i> ${escapeHtmlText(slot.time)}</span>
                             </div>
                             
                             <div class="space-y-2 mb-3">
                                 <!-- Ô chọn môn học dạng thả xuống (Dropdown) -->
                                 <div class="relative">
-                                    <select onchange="updateTeachingSlot(${state.activeDay}, '${slot.id}', 'subject', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2.5 text-white font-black text-sm outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
+                                    <select onchange="updateTeachingSlot(${toInlineJsValue(state.activeDay)}, '${escapeInlineJs(slot.id)}', 'subject', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2.5 text-white font-black text-sm outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
                                         <option value="" class="text-slate-400">+ Chọn môn học</option>
                                         ${subjectOptions}
                                     </select>
@@ -7793,7 +7761,7 @@ window.playBellSound = function(idx = 0) {
                                 </div>
 
                                 <!-- Ô nhập tên giáo viên -->
-                                <input type="text" value="${escapeHtmlAttr(data.teacher)}" placeholder="Nhập tên giáo viên..." onchange="updateTeachingSlot(${state.activeDay}, '${slot.id}', 'teacher', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2 text-blue-200 text-xs font-bold outline-none focus:border-amber-400 transition-colors">
+                                <input type="text" value="${escapeHtmlAttr(data.teacher)}" placeholder="Nhập tên giáo viên..." onchange="updateTeachingSlot(${toInlineJsValue(state.activeDay)}, '${escapeInlineJs(slot.id)}', 'teacher', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2 text-blue-200 text-xs font-bold outline-none focus:border-amber-400 transition-colors">
                             </div>
                         </div>
                     `;
@@ -7803,8 +7771,8 @@ window.playBellSound = function(idx = 0) {
             const dayTabsHtml = days.map(day => {
                 const isActive = state.activeDay === day.id;
                 return `
-                    <button onclick="state.activeDay = ${day.id}; renderLayout();" class="px-6 py-3 rounded-2xl text-sm font-black transition-all ${isActive ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
-                        ${day.label} ${day.id === 7 ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">4 Tiết</span>' : ''}
+                    <button onclick="state.activeDay = ${toInlineJsValue(day.id)}; renderLayout();" class="px-6 py-3 rounded-2xl text-sm font-black transition-all ${isActive ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
+                        ${escapeHtmlText(day.label)} ${day.id === 7 ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">4 Tiết</span>' : ''}
                     </button>
                 `;
             }).join('');
@@ -7905,25 +7873,25 @@ window.playBellSound = function(idx = 0) {
                         "Toán", "Văn", "Lý", "Hóa", "Sinh", 
                         "Công nghệ", "Thể dục", "TNHN", "Tin học", 
                         "Lịch Sử", "Anh văn", "Địa lý", "GDCD", "SHDC", "SHCN", "Phân hóa"
-                    ].map(sub => `<option value="${sub}" ${data.subject === sub ? 'selected' : ''}>${sub}</option>`).join('');
+                    ].map(sub => `<option value="${escapeHtmlText(sub)}" ${data.subject === sub ? 'selected' : ''}>${sub}</option>`).join('');
 
                     // Danh sách các lớp 
                     const classList = [
                         "12A1", "12A2", "12A3", "12A4", "12A5", "12A6", "12A7", "12A8", "12A9", "12A10", "12A11", "12A12", "12A13",
                         "11A5", "11A6"
                     ];
-                    const classOptions = classList.map(cls => `<option value="${cls}" ${data.teacher === cls ? 'selected' : ''}>${cls}</option>`).join('');
+                    const classOptions = classList.map(cls => `<option value="${escapeHtmlText(cls)}" ${data.teacher === cls ? 'selected' : ''}>${cls}</option>`).join('');
 
                     return `
                         <div class="bg-[#1e2343] border border-blue-400/20 rounded-2xl p-4 shadow-sm hover:border-blue-400/50 transition-all flex flex-col justify-between group relative">
                             <div class="flex justify-between items-center text-blue-200 text-[11px] font-bold mb-3">
-                                <span class="bg-blue-900/60 px-2.5 py-1 rounded-lg border border-blue-400/10">${slot.period}</span>
-                                <span class="flex items-center gap-1 text-slate-300"><i class="ph-bold ph-clock text-amber-400"></i> ${slot.time}</span>
+                                <span class="bg-blue-900/60 px-2.5 py-1 rounded-lg border border-blue-400/10">${escapeHtmlText(slot.period)}</span>
+                                <span class="flex items-center gap-1 text-slate-300"><i class="ph-bold ph-clock text-amber-400"></i> ${escapeHtmlText(slot.time)}</span>
                             </div>
                             
                             <div class="space-y-2 mb-3">
                                 <div class="relative">
-                                    <select onchange="updateTeachingSlot(${state.activeDay}, '${slot.id}', 'subject', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2.5 text-white font-black text-sm outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
+                                    <select onchange="updateTeachingSlot(${toInlineJsValue(state.activeDay)}, '${escapeInlineJs(slot.id)}', 'subject', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2.5 text-white font-black text-sm outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
                                         <option value="" class="text-slate-400">+ Chọn môn học</option>
                                         ${subjectOptions}
                                     </select>
@@ -7931,7 +7899,7 @@ window.playBellSound = function(idx = 0) {
                                 </div>
 
                                 <div class="relative">
-                                    <select onchange="updateTeachingSlot(${state.activeDay}, '${slot.id}', 'teacher', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2 text-blue-200 text-xs font-bold outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
+                                    <select onchange="updateTeachingSlot(${toInlineJsValue(state.activeDay)}, '${escapeInlineJs(slot.id)}', 'teacher', this.value)" class="w-full bg-[#141830] border border-blue-400/20 rounded-xl px-3 py-2 text-blue-200 text-xs font-bold outline-none focus:border-amber-400 transition-colors appearance-none cursor-pointer">
                                         <option value="" class="text-slate-500/70">+ Chọn lớp</option>
                                         ${classOptions}
                                     </select>
@@ -7945,8 +7913,8 @@ window.playBellSound = function(idx = 0) {
             const dayTabsHtml = days.map(day => {
                 const isActive = state.activeDay === day.id;
                 return `
-                    <button onclick="state.activeDay = ${day.id}; renderLayout();" class="px-6 py-3 rounded-2xl text-sm font-black transition-all ${isActive ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
-                        ${day.label} ${day.id === 7 ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">4 Tiết</span>' : ''}
+                    <button onclick="state.activeDay = ${toInlineJsValue(day.id)}; renderLayout();" class="px-6 py-3 rounded-2xl text-sm font-black transition-all ${isActive ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}">
+                        ${escapeHtmlText(day.label)} ${day.id === 7 ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">4 Tiết</span>' : ''}
                     </button>
                 `;
             }).join('');
@@ -8073,10 +8041,10 @@ window.playBellSound = function(idx = 0) {
                         <div class="relative z-10 flex items-start gap-4 mb-4">
                             ${getAvatarImg(student.avatarUrl, student.name, "w-14 h-14 ring-4 ring-rose-50 shadow-sm object-cover")}
                             <div class="flex-1 min-w-0">
-                                <h3 class="text-lg font-black text-slate-800 truncate">${student.name}</h3>
-                                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">${student.group}</div>
+                                <h3 class="text-lg font-black text-slate-800 truncate">${escapeHtmlText(student.name)}</h3>
+                                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">${escapeHtmlText(student.group)}</div>
                             </div>
-                            <button onclick="openEditCompanionModal(${c.id})" class="text-slate-400 hover:text-blueAccent transition-colors bg-slate-50 p-2 rounded-full border border-slate-100" title="Chỉnh sửa / Xóa bớt lỗi"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
+                            <button onclick="openEditCompanionModal(${toInlineJsValue(c.id)})" class="text-slate-400 hover:text-blueAccent transition-colors bg-slate-50 p-2 rounded-full border border-slate-100" title="Chỉnh sửa / Xóa bớt lỗi"><i class="ph-fill ph-pencil-simple text-lg"></i></button>
                         </div>
                         
                         <div class="relative z-10 mb-4 flex-1">
@@ -8093,7 +8061,7 @@ window.playBellSound = function(idx = 0) {
                             <div class="text-[10px] font-bold text-slate-500 flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
                                 <i class="ph-bold ph-calendar-plus text-blueAccent"></i> Bắt đầu: ${formatDateForDisplay(c.startDate)}
                             </div>
-                            <button onclick="deleteCompanion(${c.id})" class="text-[11px] font-bold text-rose-600 hover:text-white hover:bg-rose-500 bg-rose-50 px-3 py-1.5 rounded-lg transition-colors border border-rose-100 hover:border-rose-500 shadow-sm">Hoàn thành</button>
+                            <button onclick="deleteCompanion(${toInlineJsValue(c.id)})" class="text-[11px] font-bold text-rose-600 hover:text-white hover:bg-rose-500 bg-rose-50 px-3 py-1.5 rounded-lg transition-colors border border-rose-100 hover:border-rose-500 shadow-sm">Hoàn thành</button>
                         </div>
                     </div>
                 `;
@@ -8131,7 +8099,7 @@ window.playBellSound = function(idx = 0) {
             const companion = id ? state.companions.find(c => c.id === id) : { studentId: '', startDate: today, issue: '', measures: '' };
             
             const studentOptions = state.students.map(s => 
-                `<option value="${s.id}" ${companion.studentId == s.id ? 'selected' : ''}>${s.name} (${s.group})</option>`
+                `<option value="${escapeHtmlText(s.id)}" ${companion.studentId == s.id ? 'selected' : ''}>${escapeHtmlText(s.name)} (${escapeHtmlText(s.group)})</option>`
             ).join('');
 
             const modalHtml = `
@@ -8154,7 +8122,7 @@ window.playBellSound = function(idx = 0) {
                             
                             <div>
                                 <label class="block text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-widest">Ngày bắt đầu theo dõi</label>
-                                <input type="date" id="comp-date" value="${companion.startDate}" class="w-full px-4 py-3.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 focus:border-rose-500 outline-none transition-all shadow-sm cursor-pointer">
+                                <input type="date" id="comp-date" value="${escapeHtmlText(companion.startDate)}" class="w-full px-4 py-3.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 focus:border-rose-500 outline-none transition-all shadow-sm cursor-pointer">
                             </div>
                             
                             <div>
@@ -8257,7 +8225,7 @@ window.playBellSound = function(idx = 0) {
                                 </div>
 
                                 <div class="w-full h-[500px] rounded-[2.5rem] overflow-hidden relative group shadow-inner bg-slate-100">
-                                    <img src="${bannerBg}" class="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" alt="Ảnh lớp">
+                                    <img src="${safeImageUrl(bannerBg)}" class="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" alt="Ảnh lớp">
                                     
                                     <!-- Lớp phủ Gradient mượt mà để hiện chữ -->
                                     <div class="absolute inset-0 bg-gradient-to-t from-[#1e1b4b] via-[#1e1b4b]/40 to-transparent opacity-90"></div>
@@ -8267,7 +8235,7 @@ window.playBellSound = function(idx = 0) {
                                         <div class="flex items-center gap-2 mb-4">
                                             <span class="bg-white/20 backdrop-blur-md px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest border border-white/30 flex items-center gap-1.5"><i class="ph-fill ph-stars text-yellow-300"></i> Không Gian Học Tập</span>
                                         </div>
-                                        <h1 class="text-6xl font-black tracking-tight mb-4 drop-shadow-lg">${state.admin.className || 'LỚP 12A5'}</h1>
+                                        <h1 class="text-6xl font-black tracking-tight mb-4 drop-shadow-lg">${escapeHtmlText(state.admin.className || 'LỚP 12A5')}</h1>
                                         <p class="text-indigo-100 font-medium text-base max-w-2xl leading-relaxed drop-shadow-md">Nơi gieo mầm tri thức và lưu giữ những kỷ niệm thanh xuân rực rỡ nhất của tuổi học trò.</p>
                                     </div>
                                 </div>
@@ -8425,7 +8393,7 @@ window.renderLoginScreen = function() {
                             
                             <!-- Khung viền đứt tải ảnh trường -->
                             <div class="w-full h-20 md:h-24 border-2 border-dashed border-slate-300 rounded-2xl overflow-hidden mb-6 flex justify-center items-center relative group cursor-pointer hover:border-blue-400 transition-colors shadow-sm bg-slate-50/50" onclick="document.getElementById('school-logo-upload').click()" title="Bấm để đổi ảnh logo trường">
-                                <img src="${(state.theme && state.theme.schoolLogoUrl) ? state.theme.schoolLogoUrl : 'https://truonghoasen.com/wp-content/uploads/2023/10/logo-hoa-sen-01.png'}" class="w-full h-full object-contain p-1" alt="School Logo" id="school-logo-img">
+                                <img src="${safeImageUrl((state.theme && state.theme.schoolLogoUrl) ? state.theme.schoolLogoUrl : 'https://truonghoasen.com/wp-content/uploads/2023/10/logo-hoa-sen-01.png')}" class="w-full h-full object-contain p-1" alt="School Logo" id="school-logo-img">
                                 <div class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                     <i class="ph-bold ph-camera text-white text-2xl"></i>
                                 </div>
@@ -8434,7 +8402,7 @@ window.renderLoginScreen = function() {
 
                             <!-- Khung tải ảnh lớp học -->
                             <div class="relative w-full h-[300px] md:h-[400px] rounded-[2rem] overflow-hidden shadow-lg group">
-                                <img src="${(state.theme && state.theme.loginClassImg) ? state.theme.loginClassImg : (state.admin.classAvatarUrl || 'https://placehold.co/600x800/1e1b4b/ffffff?text=L%E1%BB%9AP+H%E1%BB%8CC')}" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" id="login-class-img">
+                                <img src="${safeImageUrl((state.theme && state.theme.loginClassImg) ? state.theme.loginClassImg : (state.admin.classAvatarUrl || 'https://placehold.co/600x800/1e1b4b/ffffff?text=L%E1%BB%9AP+H%E1%BB%8CC'))}" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" id="login-class-img">
                                 
                                 <button class="absolute top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-xl text-blue-600 shadow-md flex items-center justify-center hover:bg-blue-50 transition-colors z-20" onclick="document.getElementById('login-class-upload').click()" title="Đổi ảnh lớp">
                                     <i class="ph-bold ph-camera text-xl"></i>
@@ -8447,7 +8415,7 @@ window.renderLoginScreen = function() {
 
                                 <div class="absolute inset-0 bg-gradient-to-t from-[#1e1b4b]/90 via-[#1e1b4b]/20 to-transparent flex flex-col justify-end p-6 z-10 pointer-events-none">
                                     <span class="bg-amber-400 text-[#1e1b4b] text-[10px] font-black px-3 py-1.5 rounded-lg w-max mb-3 tracking-widest shadow-sm">KHÔNG GIAN HỌC TẬP</span>
-                                    <h1 class="text-white text-3xl font-black mb-2 shadow-sm">${state.admin.className || 'LỚP 12A5'}</h1>
+                                    <h1 class="text-white text-3xl font-black mb-2 shadow-sm">${escapeHtmlText(state.admin.className || 'LỚP 12A5')}</h1>
                                     <p class="text-blue-50 text-xs font-medium leading-relaxed opacity-90">Nơi gieo mầm tri thức và lưu giữ những kỷ niệm thanh xuân rực rỡ nhất của tuổi học trò.</p>
                                 </div>
                             </div>
@@ -8629,9 +8597,9 @@ window.startApp = function() {
 
         function saveData() {
             try {
-                localStorage.setItem('chuyen_tau_data', JSON.stringify(state));
+                localStorage.setItem('chuyen_tau_data', JSON.stringify(state));window.localSaveFailed=false;return true;
             } catch (e) {
-                console.warn("Không thể lưu localStorage:", e);
+                window.localSaveFailed=true;console.warn("Không thể lưu localStorage:", e);return false;
             }
         }
        window.onload = function() { 
@@ -8641,34 +8609,22 @@ window.startApp = function() {
         console.error("Không tìm thấy hàm khởi động startApp!");
     }
 };
-window.deleteHistoryRecord = function(studentId, historyId) {
-            const student = state.students.find(s => s.id === studentId);
-            if (!student) return;
-            
-            const historyIndex = student.history.findIndex(h => h.id === historyId);
-            if (historyIndex > -1) {
-                const h = student.history[historyIndex];
-                if (confirm(`Cô có chắc chắn muốn xóa lịch sử: "${h.reason}" và hoàn tác ${h.points} điểm này không?`)) {
-                    // 1. Trả lại điểm số
-                    student.points = (student.points || 0) - h.points;
-                    student.stars = Math.max(0, (student.stars || 0) - h.points); // Cập nhật lại cả Sao đổi quà
-                    
-                    // 2. Xóa dòng lịch sử
-                    student.history.splice(historyIndex, 1);
-                    
-                    // 3. Lưu và tải lại giao diện
-                    saveData();
-                    renderLayout(); // Cập nhật điểm ngoài màn hình chính
-                    openStudentHistoryModal(studentId); // Mở lại bảng lịch sử mới
-                    showToast("Đã xóa lịch sử và hoàn tác điểm thành công!", "success");
-                }
-            }
-        };
+window.deleteHistoryRecord = function(studentId,historyId) {
+    const student=state.students.find(s=>s.id===studentId),h=student?.history?.find(h=>h.id===historyId);
+    if(!h||!Number.isFinite(Number(h.points))||h.reversedAt||h.reverses)return showToast('Ghi nhận này đã hoàn tác hoặc là giao dịch hoàn tác.','error');
+    if((h.balanceEpoch||0)!==(student.balanceEpoch||0))return showToast('Ghi nhận thuộc trước lần đặt lại số dư. Hãy tạo điều chỉnh mới; không tự hoàn lại số dư cũ.','error');
+    const known=Number.isFinite(h.starsDelta),starDelta=known?-h.starsDelta:0;
+    if(known&&Number(student.stars||0)+starDelta<0)return showToast('Sao đã được sử dụng; hãy xử lý giao dịch đổi quà trước khi hoàn tác ghi nhận này.','error');
+    if(!confirm('Hoàn tác '+h.points+' điểm cho '+student.name+' và giữ lịch sử? '+(known?'Điều chỉnh sao thực tế: '+starDelta+'.':'Ghi nhận cũ chưa có biến động sao: chỉ hoàn điểm, giữ số sao hiện tại.')))return;
+    h.reversedAt=new Date().toISOString();student.points=Number(student.points||0)-Number(h.points);student.stars=Number(student.stars||0)+starDelta;
+    student.history.push({id:'reverse_'+Date.now()+'_'+Math.random(),date:h.reversedAt,points:-Number(h.points),starsDelta:starDelta,balanceEpoch:student.balanceEpoch||0,reverses:h.id,reason:'Hoàn tác: '+h.reason});
+    saveData();renderLayout();openStudentHistoryModal(studentId);showToast('Đã hoàn tác và giữ lịch sử đối chiếu.','success');
+};
     </script>
-<script src="home-results.js?v=conduct-period-20261015"></script>
-<script src="class-hub-model.js?v=20261018-nav1"></script>
-<script src="class-hub-rules-ui.js?v=20261018-nav1"></script>
-<script src="class-hub.js?v=20261018-nav1"></script>
+<script src="home-results.js?v=protect-20261018"></script>
+<script src="class-hub-model.js?v=20261018-protect1"></script>
+<script src="class-hub-rules-ui.js?v=20261018-protect1"></script>
+<script src="class-hub.js?v=20261018-protect1"></script>
 </body>
 </html>
 

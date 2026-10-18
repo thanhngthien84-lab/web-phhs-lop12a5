@@ -141,8 +141,13 @@ function doGet(e) {
       );
     }
 
+    if (mode === "score-write-status" || mode === "score-write-recover") {
+      assertAdminKey(parameters.adminKey);const ss=SpreadsheetApp.getActiveSpreadsheet();
+      if(mode === "score-write-recover")return output(recoverScoreWrite(ss,String(parameters.tx||"")),callback);
+      const pending=scoreWritePending(ss);return output({ok:true,pending:pending?{id:pending.id,testCode:pending.testCode}:null},callback);
+    }
     if (mode === "score-book") {
-      assertAdminKey(parameters.adminKey);
+      assertAdminKey(parameters.adminKey);assertNoPendingScoreWrite(SpreadsheetApp.getActiveSpreadsheet());
 
       return output(
         {
@@ -180,7 +185,7 @@ function doGet(e) {
     }
 
     if (mode === "score-archive" || mode === "score-restore") {
-      assertAdminKey(parameters.adminKey);
+      assertAdminKey(parameters.adminKey);assertNoPendingScoreWrite(SpreadsheetApp.getActiveSpreadsheet());
 
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const testCode = String(parameters.testCode || "").trim().toUpperCase();
@@ -1664,111 +1669,51 @@ function restoreScoreTest(ss, testCode) {
   return result;
 }
 
-function saveScoreBookForAdmin(ss, input, teacherIdentity) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
-
+function saveScoreBookForAdmin(ss,input,teacherIdentity) {
+  const lock=LockService.getScriptLock();lock.waitLock(20000);
   try {
-    if (teacherIdentity) validateTeacherScoreInput(input, teacherIdentity);
-    const sheet = ss.getSheetByName("BANG_DIEM_WEB");
-    if (!sheet) throw new Error('Không tìm thấy sheet "BANG_DIEM_WEB".');
-
-    const testInput = (input && input.test) || {};
-    const subjectMap = getScoreSubjectMap();
-    const subjectCode = String(testInput.subjectCode || "").trim().toUpperCase();
-    const title = String(testInput.title || "").trim();
-    const date = String(testInput.date || "").trim();
-    let testCode = String(testInput.code || "").trim().toUpperCase();
-
-    if (!subjectMap[subjectCode]) throw new Error("Môn học không hợp lệ.");
-    if (!title) throw new Error("Tên bài kiểm tra không được để trống.");
-    if (!date) throw new Error("Ngày kiểm tra không được để trống.");
-
-    const lastColumn = Math.max(sheet.getLastColumn(), 2);
-    const codes = lastColumn >= 3
-      ? sheet.getRange(3, 3, 1, lastColumn - 2).getDisplayValues()[0]
-      : [];
-    let targetColumn = 0;
-
-    if (testCode) {
-      codes.forEach((value, index) => {
-        if (String(value || "").trim().toUpperCase() === testCode) {
-          targetColumn = index + 3;
-        }
-      });
-      if (!targetColumn) throw new Error("Không tìm thấy bài kiểm tra cần cập nhật.");
-    } else {
-      let nextNumber = 1;
-      codes.forEach(value => {
-        const match = String(value || "").trim().toUpperCase()
-          .match(new RegExp("^" + subjectCode + "_BAI_(\\d+)$"));
-        if (match) nextNumber = Math.max(nextNumber, Number(match[1]) + 1);
-      });
-      testCode = subjectCode + "_BAI_" + String(nextNumber).padStart(2, "0");
-      targetColumn = Math.max(sheet.getLastColumn() + 1, 3);
+    if(teacherIdentity)validateTeacherScoreInput(input,teacherIdentity);
+    assertNoPendingScoreWrite(ss);
+    const sheet=ss.getSheetByName('BANG_DIEM_WEB');if(!sheet)throw new Error('Không tìm thấy sheet BANG_DIEM_WEB.');
+    const test=(input&&input.test)||{},subject=String(test.subjectCode||'').trim().toUpperCase(),title=String(test.title||'').trim(),date=String(test.date||'').trim();
+    if(!Object.prototype.hasOwnProperty.call(getScoreSubjectMap(),subject))throw new Error('Môn học không hợp lệ.');
+    if(!title||title.length>200)throw new Error('Tên bài kiểm tra phải có từ 1 đến 200 ký tự.');
+    const iso=/^\d{4}-\d{2}-\d{2}$/.test(date)?date:date.replace(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,(m,d,mo,y)=>y+'-'+mo.padStart(2,'0')+'-'+d.padStart(2,'0'));
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(iso)||!Number.isFinite(Date.parse(iso+'T00:00:00Z'))||new Date(iso+'T00:00:00Z').toISOString().slice(0,10)!==iso)throw new Error('Ngày kiểm tra không hợp lệ.');
+    if(!Array.isArray(input.scores))throw new Error('Danh sách điểm không hợp lệ.');
+    const students=getClassList(),allowed=new Set(students.map(s=>normalizeStudentCode(s.studentCode))),seen=new Set();
+    const scores=input.scores.map(item=>{const code=normalizeStudentCode(item&&item.studentCode),raw=String((item&&item.score)??'').trim().replace(',','.'),note=String((item&&item.note)||'').trim();
+      if(!allowed.has(code)||seen.has(code))throw new Error('Mã học sinh không hợp lệ hoặc trùng: '+code);seen.add(code);
+      if(raw&&(!Number.isFinite(Number(raw))||Number(raw)<0||Number(raw)>10))throw new Error('Điểm của học sinh "'+code+'" phải nằm trong khoảng 0 đến 10.');
+      if(note.length>5000)throw new Error('Ghi chú điểm quá dài.');return {code,score:raw===''?'':Number(raw),note};});
+    const currentRows=Math.max(sheet.getLastRow(),5),currentCols=Math.max(sheet.getLastColumn(),2),codes=currentCols>=3?sheet.getRange(3,3,1,currentCols-2).getDisplayValues()[0]:[];
+    let code=String(test.code||'').trim().toUpperCase(),column=0;
+    if(code){codes.forEach((v,i)=>{if(String(v).trim().toUpperCase()===code)column=i+3;});if(!column)throw new Error('Không tìm thấy bài kiểm tra cần cập nhật.');}
+    else {let n=1;codes.forEach(v=>{const m=String(v).match(new RegExp('^'+subject+'_BAI_(\\d+)$'));if(m)n=Math.max(n,Number(m[1])+1);});code=subject+'_BAI_'+String(n).padStart(2,'0');column=currentCols+1;}
+    const identities=currentRows>=6?sheet.getRange(6,1,currentRows-5,2).getDisplayValues():[],rowByCode={};identities.forEach((r,i)=>{if(r[0])rowByCode[normalizeStudentCode(r[0])]=i+6;});
+    let rows=currentRows;students.forEach(student=>{const id=normalizeStudentCode(student.studentCode);if(id&&!rowByCode[id])rowByCode[id]=++rows;});const cols=Math.max(currentCols,column);
+    if(rows*cols>200000)throw new Error('Sổ điểm quá lớn để lưu an toàn trong một lượt. Hãy liên hệ quản trị.');
+    if(rows>sheet.getMaxRows())sheet.insertRowsAfter(sheet.getMaxRows(),rows-sheet.getMaxRows());if(cols>sheet.getMaxColumns())sheet.insertColumnsAfter(sheet.getMaxColumns(),cols-sheet.getMaxColumns());
+    const range=sheet.getRange(1,1,rows,cols),values=range.getValues(),formulas=range.getFormulas(),notes=range.getNotes(),formats=range.getNumberFormats();
+    const before={rows,cols,cells:values.map((r,i)=>r.map((v,j)=>formulas[i][j]?{formula:formulas[i][j]}:v instanceof Date?{date:v.toISOString()}:typeof v==='string'?{text:v}:v)),notes,formats};
+    const next=scoreWriteCells(before),nextNotes=notes.map(r=>r.slice());
+    next[2][column-1]=code;next[3][column-1]=scoreWriteText(title);next[4][column-1]=scoreWriteText(date);
+    students.forEach(student=>{const r=rowByCode[normalizeStudentCode(student.studentCode)]-1;next[r][0]=scoreWriteText(String(student.studentCode));next[r][1]=scoreWriteText(student.name);});
+    scores.forEach(item=>{const r=rowByCode[item.code]-1;next[r][column-1]=item.score;nextNotes[r][column-1]=item.note;});
+    const backup=beginScoreWrite(ss,before,code);
+    try {
+      sheet.getRange(1,1,rows,2).setNumberFormat('@');sheet.getRange(3,column,3,1).setNumberFormat('@');range.setValues(next);range.setNotes(nextNotes);SpreadsheetApp.flush();
+      const result=readScoreBookForAdmin(ss);result.selectedTestCode=code;finishScoreWrite(backup,'committed');return result;
+    } catch(error) {
+      try {restoreScoreWrite(ss,before);finishScoreWrite(backup,'rolled-back');}
+      catch(rollbackError){try{finishScoreWrite(backup,'recovery-needed');}catch(_){}throw new Error('Lưu điểm bị gián đoạn; bản trước đã được sao lưu. Tạm dừng nhập và dùng Kiểm tra / phục hồi lần lưu điểm.');}
+      throw new Error('Không lưu điểm; đã khôi phục dữ liệu trước lượt lưu. '+String(error.message||error));
     }
-
-    sheet.getRange(3, targetColumn).setNumberFormat("@").setValue(testCode);
-    sheet.getRange(4, targetColumn).setValue(title);
-    sheet.getRange(5, targetColumn).setNumberFormat("@").setValue(date);
-
-    const classStudents = getClassList();
-    const lastRow = Math.max(sheet.getLastRow(), 5);
-    const identityValues = lastRow >= 6
-      ? sheet.getRange(6, 1, lastRow - 5, 2).getDisplayValues()
-      : [];
-    const rowByStudentCode = {};
-
-    identityValues.forEach((row, index) => {
-      const code = normalizeStudentCode(row[0]);
-      if (code && code !== SCORE_AVERAGE_ROW_CODE) rowByStudentCode[code] = index + 6;
-    });
-
-    classStudents.forEach(student => {
-      const code = normalizeStudentCode(student.studentCode);
-      if (!code || rowByStudentCode[code]) return;
-      const newRow = Math.max(sheet.getLastRow() + 1, 6);
-      writeStudentIdentityRow(sheet, newRow, code, student.name);
-      rowByStudentCode[code] = newRow;
-    });
-
-    const scoreRows = Array.isArray(input && input.scores)
-      ? input.scores
-      : [];
-
-    scoreRows.forEach(item => {
-      const studentCode = normalizeStudentCode(item && item.studentCode);
-      const targetRow = rowByStudentCode[studentCode];
-      if (!studentCode || !targetRow) return;
-
-      const rawScore = String((item && item.score) ?? "").trim().replace(",", ".");
-      const note = String((item && item.note) || "").trim();
-      const cell = sheet.getRange(targetRow, targetColumn);
-
-      if (!rawScore) {
-        cell.clearContent();
-      } else {
-        const score = Number(rawScore);
-        if (!Number.isFinite(score) || score < 0 || score > 10) {
-          throw new Error(
-            'Điểm của học sinh "' + studentCode + '" phải nằm trong khoảng 0 đến 10.'
-          );
-        }
-        cell.setValue(score);
-      }
-      cell.setNote(note);
-    });
-
-    SpreadsheetApp.flush();
-    const scoreBook = readScoreBookForAdmin(ss);
-    scoreBook.selectedTestCode = testCode;
-    return scoreBook;
-  } finally {
-    lock.releaseLock();
-  }
+  } finally {lock.releaseLock();}
 }
 
 function readScores(ss, studentCode) {
+  assertNoPendingScoreWrite(ss);
   const sheet = ss.getSheetByName("BANG_DIEM_WEB");
   if (!sheet) return [];
 
@@ -2319,6 +2264,17 @@ function saveHomework(ss, input) {
  return {savedCount:updates.length};
  }finally{lock.releaseLock();}
 }
+
+
+/* Score write journal: backup first, validate before mutation, rollback under the same lock. */
+function scoreWriteText(value){const s=String(value??'');return /^[=']/.test(s)?"'"+s:s;}
+function scoreWriteCells(snapshot){return snapshot.cells.map(row=>row.map(cell=>cell&&typeof cell==='object'?cell.formula|| (cell.date?new Date(cell.date):scoreWriteText(cell.text)):cell));}
+function scoreWritePending(ss){const sheet=ss.getSheetByName('SAO_LUU_GHI_DIEM');if(!sheet||sheet.getLastRow()<2)return null;const values=sheet.getDataRange().getDisplayValues();const row=values[values.length-1];if(!['pending','recovery-needed'].includes(row[1]))return null;const parts=values.slice(1).filter(r=>r[0]===row[0]);return {sheet,id:row[0],testCode:row[5],start:values.findIndex(r=>r[0]===row[0])+1,count:parts.length,parts};}
+function assertNoPendingScoreWrite(ss){if(scoreWritePending(ss))throw new Error('Có lượt lưu điểm chưa hoàn tất. Dùng Kiểm tra / phục hồi lần lưu điểm trước khi tiếp tục.');}
+function beginScoreWrite(ss,snapshot,testCode){let sheet=ss.getSheetByName('SAO_LUU_GHI_DIEM');if(!sheet){sheet=ss.insertSheet('SAO_LUU_GHI_DIEM');sheet.getRange(1,1,1,6).setValues([['PhienLuu','TrangThai','Phan','JSON','ThoiDiem','BaiKiemTra']]);sheet.setFrozenRows(1);}const id=Utilities.getUuid(),json=JSON.stringify(snapshot),chunks=[];for(let offset=0;offset<json.length;){let end=Math.min(offset+25000,json.length);if(/[\uD800-\uDBFF]/.test(json.charAt(end-1)))end--;chunks.push([id,'pending',String(chunks.length),'JSON:'+json.slice(offset,end),new Date().toISOString(),testCode]);offset=end;}const start=sheet.getLastRow()+1;if(start+chunks.length-1>sheet.getMaxRows())sheet.insertRowsAfter(sheet.getMaxRows(),start+chunks.length-1-sheet.getMaxRows());sheet.getRange(start,1,chunks.length,6).setNumberFormat('@').setValues(chunks);SpreadsheetApp.flush();return {sheet,start,count:chunks.length};}
+function finishScoreWrite(record,status){record.sheet.getRange(record.start,2,record.count,1).setValues(Array.from({length:record.count},()=>[status]));SpreadsheetApp.flush();}
+function restoreScoreWrite(ss,snapshot){const sheet=ss.getSheetByName('BANG_DIEM_WEB');if(!sheet)throw new Error('Thiếu sổ điểm để phục hồi.');if(snapshot.rows>sheet.getMaxRows())sheet.insertRowsAfter(sheet.getMaxRows(),snapshot.rows-sheet.getMaxRows());if(snapshot.cols>sheet.getMaxColumns())sheet.insertColumnsAfter(sheet.getMaxColumns(),snapshot.cols-sheet.getMaxColumns());const range=sheet.getRange(1,1,snapshot.rows,snapshot.cols);range.setValues(scoreWriteCells(snapshot));range.setNotes(snapshot.notes);range.setNumberFormats(snapshot.formats);SpreadsheetApp.flush();}
+function recoverScoreWrite(ss,id){const lock=LockService.getScriptLock();lock.waitLock(20000);try{const pending=scoreWritePending(ss);if(!pending)return {ok:true,recovered:false};if(pending.id!==id)throw new Error('Phiên phục hồi đã thay đổi. Hãy kiểm tra lại.');if(pending.parts.some((r,i)=>Number(r[2])!==i||!r[3].startsWith('JSON:')))throw new Error('Bản sao chưa đầy đủ. Giữ nguyên sổ điểm và kiểm tra Sheet.');const snapshot=JSON.parse(pending.parts.map(r=>r[3].slice(5)).join(''));restoreScoreWrite(ss,snapshot);finishScoreWrite(pending,'rolled-back');return {ok:true,recovered:true};}finally{lock.releaseLock();}}
 
 /* Private teacher data. These modes are dispatched after admin authentication. */
 function classHubHandle(p) {

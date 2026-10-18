@@ -129,7 +129,7 @@
             if (prioritySelection(student,data).length !== 4) result.unconfigured.push(student);
             const homework = homeworkRecords(student,data);
             const homeworkKeys = new Set(homework.map(r=>r.key));
-            const history = (student.history || []).filter(h => !/\[Học tập\]|đổi quà/i.test(h.reason || '') && !(h.homeworkKey && homeworkKeys.has(h.homeworkKey)));
+            const history = (student.history || []).filter(h => !h.reversedAt && !h.reverses && !/\[Học tập\]|đổi quà/i.test(h.reason || '') && !(h.homeworkKey && homeworkKeys.has(h.homeworkKey)));
             const dated = history.map(h => ({...h, day:date(h.date)}));
             result.undated += dated.filter(h => !h.day).length + homework.filter(h=>!h.day).length;
             const recent = dated.filter(h => within(h.day,cp.start,cp.end));

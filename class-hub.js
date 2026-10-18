@@ -18,15 +18,15 @@
   let sourcesLoading=false,sourceAttempt=0,sourceMessage='';
   const metaKey='lop12a5_hub_meta_v1';
   const copy=value=>JSON.parse(JSON.stringify(value));
-  function normalize() { M.migrate(state); }
+  function normalize() { M.migrate(state);state.hubArchived=state.hubArchived||{};state.students=state.students.filter(s=>!state.hubArchived[key(s)]?.archivedAt); }
   function studentExtra(s) {
     const result={studentCode:key(s)};
-    ['points','stars','history','group','role','talent','avatarUrl','gender','birthday','residence','goal','comment'].forEach(k=>{if(s[k]!==undefined)result[k]=s[k];});
+    ['points','stars','history','group','role','talent','avatarUrl','gender','birthday','residence','goal','comment','balanceEpoch'].forEach(k=>{if(s[k]!==undefined)result[k]=s[k];});
     return result;
   }
   function snapshot() {
     normalize();
-    const students={...extras};
+    const students={...extras,...(state.hubArchived||{})};
     (state.students||[]).forEach(s=>{students[key(s)]=studentExtra(s);});
     const settings={};
     ['sidebarPosition','deductStarsOnRedeem','studentPrioritySubjects','hubRules'].forEach(k=>{if(state.settings&&state.settings[k]!==undefined)settings[k]=state.settings[k];});
@@ -48,7 +48,7 @@
     M.validateSnapshot(s);
     backup();applying=true;
     try {
-      extras=Object.fromEntries(s.students.map(s=>[s.studentCode,s]));
+      extras=Object.fromEntries(s.students.map(s=>[s.studentCode,s]));state.hubArchived=Object.fromEntries(s.students.filter(s=>s.archivedAt).map(s=>[s.studentCode,copy(s)]));
       (state.students||[]).forEach(student=>{const extra=extras[key(student)];if(extra){const {studentCode,legacyId,...fields}=extra;Object.assign(student,copy(fields));}});
       ['groups','rewards','criteria','companions','recognitions','redemptions','settings','admin','theme','academicYear','homeSemester'].forEach(k=>{if(s[k]!==undefined)state[k]=copy(s[k]);});
       normalize();originalSave();baseline=fingerprint();dirty=false;remember();
@@ -64,7 +64,8 @@
     return student;
   };
   function paintStatus() {
-    document.querySelectorAll('#hub-save-status,#hub-mobile-save-status').forEach(el=>el.textContent=message);
+    const visibleMessage=window.localSaveFailed?'Chưa lưu được trên máy · Giữ trang mở, xuất bản nháp hoặc lưu lên Sheet. '+(cloud==='ready'&&!dirty?'Sheet đã xác nhận bản dữ liệu chung.':''):message;
+    document.querySelectorAll('#hub-save-status,#hub-mobile-save-status').forEach(el=>el.textContent=visibleMessage);
     const panel=document.getElementById('hub-sync-panel');
     if(panel)panel.innerHTML=syncPanelContents();
   }
@@ -117,8 +118,9 @@
     finally {busy=false;paintStatus();}
   }
   window.saveData=function() {
-    normalize();originalSave();if(applying||!initialized||isParentPortalMode())return;
-    const current=fingerprint();if(current===baseline)return;
+    normalize();const failedBefore=!!window.localSaveFailed,stored=originalSave();if(failedBefore&&stored)message='Đã lưu lại trên máy · Chờ xác nhận đồng bộ';if(applying||!initialized||isParentPortalMode())return stored;
+    if(stored===false){clearTimeout(saveTimer);dirty=true;remember();message='Chưa lưu được trên máy. Giữ trang mở; xuất bản nháp hoặc bấm lưu lên Sheet.';paintStatus();return false;}
+    const current=fingerprint();if(current===baseline){paintStatus();return stored;}
     dirty=true;if(busy)changedDuringLoad=true;remember();
     clearTimeout(saveTimer);
     if(cloud==='ready'){message='Đã lưu trên máy · Chờ xác nhận từ Sheet';saveTimer=setTimeout(()=>{if(cloud==='ready'&&dirty)saveCloud();},1800);}
@@ -131,7 +133,8 @@
   }
   const syncPanel=()=>`<section id="hub-sync-panel" class="hub-card">${syncPanelContents()}</section>`;
   function exportDraft() {
-    const url=URL.createObjectURL(new Blob([JSON.stringify({savedAt:new Date().toISOString(),snapshot:snapshot()},null,2)],{type:'application/json'}));
+    const deviceData={};for(const field of ['timetable','dailySchedule','seatingChart','hiddenSeats','tasks','journeys','scoreBook','scoreDrafts','scoreLocalTrash','homeHomework','homeworkBook'])if(state[field]!==undefined)deviceData[field]=copy(state[field]);if(deviceData.scoreBook)deviceData.scoreBook.loading=false;
+    const url=URL.createObjectURL(new Blob([JSON.stringify({savedAt:new Date().toISOString(),snapshot:snapshot(),deviceData},null,2)],{type:'application/json'}));
     const a=document.createElement('a');a.href=url;a.download='12A5-du-lieu-chung-'+M.day(new Date())+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   function dialog(title,body) {
@@ -274,15 +277,23 @@
   window.selectStudentForPoints=function(id) {
     state.pointsForm.targetType='student';state.pointsForm.selectedTargetId=id;switchTab('tich-diem');
   };
-  window.renderViewHocSinh=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Ghi nhận thi đua','points','',true)}${button('Đồng hành học sinh','support-list')}</div>`+oldViews.students();
+  window.renderViewHocSinh=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Ghi nhận thi đua','points','',true)}${button('Đồng hành học sinh','support-list')}${button('Học sinh đã lưu trữ','student-archives')}</div>`+oldViews.students();
   window.renderViewTongQuan=()=>{
     const p=M.period('week');
     return `<div class="hub-card" style="margin-bottom:18px"><div class="hub-sync-bar"><div><strong>Theo dõi và động viên</strong><p class="hub-muted">${state.companions.filter(c=>c.status!=='completed').length} hồ sơ đang đồng hành · ${state.recognitions.filter(r=>r.status==='approved'&&r.periodKind==='week'&&r.periodStart===p.start).length} tuyên dương đã duyệt tuần này</p></div><div class="hub-actions">${button('Đồng hành','support-list')}${button('Tuyên dương','rank-list')}${button('Ghi nhận thi đua','points')}</div></div></div>`+oldViews.home();
   };
   window.renderViewNhomThiDua=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Ghi nhận cho tổ / cả lớp','points-group','',true)}${button('Quy tắc thi đua','points-rules')}${button('Xuất báo cáo thi đua','report','conduct')}</div>`+oldViews.groups();
   window.renderViewDoiQua=()=>`<div class="hub-actions" style="margin-bottom:18px">${button('Quản lý danh mục quà','reward-catalog')}${button('Lịch sử đổi quà','redemptions')}${button('Quy tắc đổi quà','reward-rules')}</div>`+oldViews.rewards();
-  window.renderViewDiemHocTap=()=>`<div class="hub-actions" style="margin-bottom:14px">${button('Quản lý người đăng BTVN','homework-admin')}${button('Xuất báo cáo học tập','report','learning')}</div>`+oldViews.learning();
+  window.renderViewDiemHocTap=()=>`<div class="hub-actions" style="margin-bottom:14px">${button('Quản lý người đăng BTVN','homework-admin')}${button('Xuất báo cáo học tập','report','learning')}${button('Kiểm tra / phục hồi lần lưu điểm','score-recovery')}</div>`+oldViews.learning();
   window.renderViewBaoCao=()=>`<div class="hub-actions" style="margin-bottom:14px">${button('Xem các học sinh cần đồng hành','support-list')}${button('Đề xuất tuyên dương','rank-list')}</div>`+oldViews.report();
+  window.deleteStudent=function(id){
+    const student=state.students.find(s=>String(s.id)===String(id));if(!student)return;
+    if(!confirm('Ngừng theo dõi '+student.name+'? Điểm và lịch sử được giữ trong dữ liệu chung; có thể khôi phục ở Học sinh đã lưu trữ. Không xóa hàng trong Sheet hoặc thu hồi mã PHHS.'))return;
+    const code=key(student);state.hubArchived[code]={...studentExtra(student),archivedAt:new Date().toISOString(),archivedName:student.name,archivedId:student.id};extras[code]=copy(state.hubArchived[code]);
+    state.students=state.students.filter(s=>key(s)!==code);persist();showToast('Đã lưu trữ trên phiên này. Kiểm tra xác nhận lưu lên Sheet để dùng trên thiết bị khác.','success');
+  };
+  function archivedStudents(){dialog('Học sinh đã lưu trữ',notice('Điểm và lịch sử được giữ. Khôi phục sẽ đưa học sinh trở lại danh sách theo dõi.')+Object.values(state.hubArchived||{}).map(s=>'<div class="hub-row"><div><strong>'+esc(s.archivedName||s.studentCode)+'</strong><p>'+esc(s.studentCode)+'</p></div>'+button('Khôi phục theo dõi','student-restore',s.studentCode)+'</div>').join(''));
+  }
   function rewardCatalog() {
     const saved=state.settingsTab;state.settingsTab='qua-tang';const html=oldViews.settings();state.settingsTab=saved;
     const template=document.createElement('template');template.innerHTML=html;template.content.querySelector('[onclick^="switchSettingsTab"]')?.parentElement.remove();template.content.querySelector('h2')?.closest('.flex')?.remove();
@@ -307,7 +318,7 @@
         const entry=JSON.parse(reader.result);
         if(!entry?.snapshot){backup();importLegacy(event);return;}
         if(!confirm('Phục hồi bản dữ liệu chung từ file vào thiết bị này? Bản hiện tại được sao lưu trước khi phục hồi.'))return;
-        applySnapshot(entry.snapshot);dirty=true;remember();setStatus('error','Đã phục hồi bản nháp từ file. Hãy kiểm tra / đối chiếu với Sheet trước khi lưu.');renderLayout();
+        applySnapshot(entry.snapshot);if(entry.deviceData&&typeof entry.deviceData==='object'&&!Array.isArray(entry.deviceData)){for(const field of ['timetable','dailySchedule','seatingChart','hiddenSeats','tasks','journeys','scoreBook','scoreDrafts','scoreLocalTrash','homeHomework','homeworkBook'])if(entry.deviceData[field]&&typeof entry.deviceData[field]==='object')state[field]=copy(entry.deviceData[field]);originalSave();}dirty=true;remember();setStatus('error','Đã phục hồi bản nháp từ file. Hãy kiểm tra / đối chiếu với Sheet trước khi lưu.');renderLayout();
       }catch(error){showToast(error.message||'File phục hồi không hợp lệ.','error');}
       finally {event.target.value='';}
     };
@@ -339,6 +350,9 @@
   function persist() {criteriaTarget='';saveData();closeModal();renderLayout();}
   async function action(name,value) {
     if(name==='close')return closeModal();
+    if(name==='score-recovery'){const adminKey=await getGoogleAdminKey();if(!adminKey)return;const result=await request('score-write-status',{adminKey});if(!result.pending)return showToast('Không có lượt lưu điểm bị gián đoạn cần phục hồi.','success');if(!confirm('Khôi phục sổ điểm về bản trước lượt lưu bị gián đoạn ('+result.pending.testCode+')? Không sửa trực tiếp Sheet trong lúc phục hồi.'))return;await request('score-write-recover',{adminKey,tx:result.pending.id});showToast('Đã khôi phục bản trước lượt lưu lỗi. Hãy tải điểm mới nhất.','success');return;}
+    if(name==='student-archives')return archivedStudents();
+    if(name==='student-restore'){const saved=state.hubArchived[value];if(!saved)return;if(!confirm('Khôi phục theo dõi học sinh '+saved.archivedName+'?'))return;const {archivedAt,archivedName,archivedId,...fields}=saved;delete state.hubArchived[value];extras[value]=fields;const student=mergeStudentFromGoogle({studentCode:value,name:archivedName});Object.assign(student,fields,{id:archivedId||student.id,name:archivedName,studentCode:value});state.students.push(student);persist();return;}
     if(name==='load')return load();if(name==='save')return saveCloud();if(name==='export')return exportDraft();
     if(name==='use-remote'&&remote?.snapshot){revision=remote.revision;applySnapshot(remote.snapshot);setStatus('ready','Đã dùng bản '+revision+' từ Sheet; bản cũ được sao lưu trên máy');renderLayout();return;}
     if(name==='use-local'&&remote?.snapshot){
@@ -456,7 +470,7 @@
       else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus({preventScroll:true});}
     }
   });
-  window.addEventListener('beforeunload',event=>{if(dirty&&!isParentPortalMode()){event.preventDefault();event.returnValue='';}});
+  window.addEventListener('beforeunload',event=>{if((dirty||window.localSaveFailed)&&!isParentPortalMode()){event.preventDefault();event.returnValue='';}});
   normalize();baseline=fingerprint();try{dirty=!!JSON.parse(localStorage.getItem(metaKey)||'{}').dirty;}catch(_){}
   window.ClassHub={load,save:saveCloud,snapshot,model:M,status:()=>({cloud,dirty,revision,message}),exportDraft,refreshSources};
   window.addEventListener('load',()=>{if(!isParentPortalMode()){normalize();baseline=fingerprint();initialized=true;load(true);}});
