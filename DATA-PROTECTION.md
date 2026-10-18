@@ -15,7 +15,7 @@
 
 ## Backend ghi điểm
 
-Deployment đang dùng đã cập nhật lên **version 31**, giữ nguyên URL và quyền hiện có. Nguồn đầy đủ là web12a5-reference/Code.gs; bản trong checkout phát hành có cùng nội dung.
+Deployment đang dùng đã cập nhật lên **version 32**, giữ nguyên URL và quyền hiện có. Nguồn đầy đủ là web12a5-reference/Code.gs; bản trong checkout phát hành có cùng nội dung.
 
 1. Kiểm tra tất cả điểm, mã HS trùng/không tồn tại, môn, ngày hợp lệ, độ dài nội dung trước khi sửa sổ điểm.
 2. Chuẩn bị vùng dữ liệu và ghi bản trước vào **SAO_LUU_GHI_DIEM** theo phiên/chunk JSON. Bản sao chứa ô, công thức, ghi chú và định dạng.

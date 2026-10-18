@@ -1691,7 +1691,8 @@ function saveScoreBookForAdmin(ss,input,teacherIdentity) {
     if(code){codes.forEach((v,i)=>{if(String(v).trim().toUpperCase()===code)column=i+3;});if(!column)throw new Error('Không tìm thấy bài kiểm tra cần cập nhật.');}
     else {let n=1;codes.forEach(v=>{const m=String(v).match(new RegExp('^'+subject+'_BAI_(\\d+)$'));if(m)n=Math.max(n,Number(m[1])+1);});code=subject+'_BAI_'+String(n).padStart(2,'0');column=currentCols+1;}
     const identities=currentRows>=6?sheet.getRange(6,1,currentRows-5,2).getDisplayValues():[],rowByCode={};identities.forEach((r,i)=>{if(r[0])rowByCode[normalizeStudentCode(r[0])]=i+6;});
-    let rows=currentRows;students.forEach(student=>{const id=normalizeStudentCode(student.studentCode);if(id&&!rowByCode[id])rowByCode[id]=++rows;});const cols=Math.max(currentCols,column);
+    let rows=currentRows;students.forEach(student=>{const id=normalizeStudentCode(student.studentCode);if(id&&!rowByCode[id])rowByCode[id]=++rows;});rows++; // Reserve the possible destination of the class-average formula row in the rollback snapshot.
+    const cols=Math.max(currentCols,column);
     if(rows*cols>200000)throw new Error('Sổ điểm quá lớn để lưu an toàn trong một lượt. Hãy liên hệ quản trị.');
     if(rows>sheet.getMaxRows())sheet.insertRowsAfter(sheet.getMaxRows(),rows-sheet.getMaxRows());if(cols>sheet.getMaxColumns())sheet.insertColumnsAfter(sheet.getMaxColumns(),cols-sheet.getMaxColumns());
     const range=sheet.getRange(1,1,rows,cols),values=range.getValues(),formulas=range.getFormulas(),notes=range.getNotes(),formats=range.getNumberFormats();

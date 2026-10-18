@@ -65,4 +65,4 @@ Trạm, Tuyên dương và trang tiêu chí tự đọc bảng điểm/BTVN qua 
 
 ## Bảo vệ dữ liệu 18/10/2026
 
-Xem DATA-PROTECTION.md: backend v31 thêm journal SAO_LUU_GHI_DIEM và phục hồi; giao diện escape dữ liệu, báo lỗi lưu cục bộ thật, lưu trữ/khôi phục học sinh và hoàn tác theo starsDelta thực tế. File xuất bản nháp có thêm deviceData (bao gồm điểm chưa lưu) để phục hồi trên máy, không đưa các cache này vào snapshot dùng chung. Lưu trữ không xóa hàng HOC_SINH hoặc thu hồi mã PHHS.
+Xem DATA-PROTECTION.md: backend v32 thêm journal SAO_LUU_GHI_DIEM và phục hồi; giao diện escape dữ liệu, báo lỗi lưu cục bộ thật, lưu trữ/khôi phục học sinh và hoàn tác theo starsDelta thực tế. File xuất bản nháp có thêm deviceData (bao gồm điểm chưa lưu) để phục hồi trên máy, không đưa các cache này vào snapshot dùng chung. Lưu trữ không xóa hàng HOC_SINH hoặc thu hồi mã PHHS.
