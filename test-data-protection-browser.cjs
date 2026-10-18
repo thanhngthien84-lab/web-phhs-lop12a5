@@ -42,6 +42,17 @@ const fixture={students:[{id:'google-HS01',studentCode:'HS01',name:'Học sinh k
    await page.goto('https://test.local/'+(parent?'?phhs=1':''));return page;
   }
   const page=await createPage();await page.waitForFunction(()=>ClassHub?.status().cloud==='migration');
+  // A real close-button click must dismiss the profile without rebuilding the source page.
+  for (const tab of ['tong-quan','hoc-sinh']) {
+    await page.evaluate(tab=>{switchTab(tab);const main=document.getElementById('main-content');main.insertAdjacentHTML('beforeend','<div data-scroll-fixture style="height:2000px"></div>');main.scrollTop=240;},tab);
+    const before=await page.locator('#main-content').evaluate(el=>el.scrollTop);
+    await page.evaluate(()=>openHomeStudent(state.students[0].id));
+    assert.equal(await page.locator('#parent-view-modal').count(),1);
+    await page.locator('#parent-view-modal button').filter({hasText:'Đóng'}).click();
+    assert.equal(await page.locator('#parent-view-modal').count(),0,'close button dismisses student profile');
+    assert.equal(await page.evaluate(()=>state.currentTab),tab);
+    assert.equal(await page.locator('#main-content').evaluate(el=>el.scrollTop),before,'source scroll position retained');
+  }
   await page.evaluate(()=>{const s=state.students[0];s.points=0;s.stars=0;s.history=[];executeQuickPoint(s.id,5,'Trừ thử','Nề nếp','subtract');const entry=s.history.at(-1);if(entry.starsDelta!==0)throw Error('Wrong star delta');deleteHistoryRecord(s.id,entry.id);closeModal();});assert.equal(await page.evaluate(()=>state.students[0].stars),0);assert.equal(await page.evaluate(()=>state.students[0].points),0);assert.equal(await page.evaluate(()=>state.students[0].history.filter(h=>h.reversedAt).length),1,'original history retained');assert.equal(await page.evaluate(()=>homeResultsModel(state).conduct.length),0,'reversal is not a new violation');
   await page.evaluate(()=>{const s=state.students[0];s.stars=2;executeQuickPoint(s.id,5,'Trừ thử','Nề nếp','subtract');deleteHistoryRecord(s.id,s.history.at(-1).id);closeModal();});assert.equal(await page.evaluate(()=>state.students[0].stars),2,'refund actual two stars only');
   await page.evaluate(()=>{const s=state.students[0];s.history.push({id:'legacy',date:new Date().toISOString(),points:-5,reason:'Cũ'});s.points=-5;s.stars=0;deleteHistoryRecord(s.id,'legacy');closeModal();});assert.equal(await page.evaluate(()=>state.students[0].stars),0,'never invent unknown legacy stars');
