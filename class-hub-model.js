@@ -57,16 +57,18 @@
     }
     return d;
   }
-  function scores(data,student) {
+  // A single adapter for saved marks. Drafts and local-only tests never enter reports.
+  function savedScoreRows(data,student) {
     const local=data.scoreBook||{},remote=data.hubScoreSource||{};
     const book=remote.loaded&&remote.scoreBook&&(!local.loaded||(Date.parse(remote.updatedAt)||0)>=(Date.parse(local.updatedAt)||0))?remote.scoreBook:local;
     const row=(book.students||[]).find(s=>String(s.studentCode).trim()===key(student));
-    const rows=row?(book.tests||[]).filter(t=>!t.deleted).flatMap(t=>{
+    const rows=row?(book.tests||[]).filter(t=>!t.deleted&&!t.localOnly).flatMap(t=>{
       const entry=(row.scores||{})[t.code];
-      return entry&&String(entry.score??'').trim()!==''?[{...entry,subjectCode:t.subjectCode,date:t.date,testCode:t.code}]:[];
-    }):(data.scores||[]).filter(s=>String(s.studentCode).trim()===key(student));
+      return entry&&String(entry.score??'').trim()!==''?[{...entry,subjectCode:t.subjectCode,date:t.date,testCode:t.code,testNumber:Number(String(t.code||'').match(/_BAI_(\d+)$/i)?.[1]),title:t.title,classAverage:t.classAverage}]:[];
+    }):(book.loaded||book===remote.scoreBook&&remote.loaded?[]:(data.scores||[]).filter(s=>String(s.studentCode).trim()===key(student)));
     return rows.filter(r=>String(r.score??'').trim()!==''&&Number.isFinite(Number(String(r.score).replace(',','.')))).map(r=>({...r,score:Number(String(r.score).replace(',','.'))})).filter(r=>r.score>=0&&r.score<=10);
   }
+  function scores(data,student) { return savedScoreRows(data,student); }
   function homework(data,student) {
     const rows=(data.homeHomework||{}).records||((data.homeworkBook||{}).records)||[],latest=new Map();
     rows.filter(r=>String(r.studentCode).trim()===key(student)).forEach(r=>{
@@ -212,5 +214,5 @@
     if(codes.some(code=>!code)||new Set(codes).size!==codes.length)throw new Error('Mã học sinh trong bản đồng bộ bị thiếu hoặc trùng.');
     return s;
   }
-  return {key,day,shift,period,history,net,scores,homework,evidence,academic,ranks,supportSuggestions,defaultRules,rules,migrate,validateSnapshot,metricLabels,windowLabels,operators,customRules,windowPeriod,evaluateCustom,scoreDiagnostics};
+  return {key,day,shift,period,history,net,scores,savedScoreRows,homework,evidence,academic,ranks,supportSuggestions,defaultRules,rules,migrate,validateSnapshot,metricLabels,windowLabels,operators,customRules,windowPeriod,evaluateCustom,scoreDiagnostics};
 }));

@@ -62,18 +62,8 @@
         return selected.length <= 4 ? selected : ['TOAN','VAN'];
     }
     function savedScores(student, data = state) {
-        const code = String(student.studentCode || student.id).trim();
-        const book = data.scoreBook || {};
-        const row = (book.students || []).find(s => String(s.studentCode).trim() === code);
-        const rows = [];
-        if (row) (book.tests || []).forEach(test => {
-            const entry = (row.scores || {})[test.code];
-            if (entry && String(entry.score ?? '').trim() !== '') rows.push({testCode:test.code, testNumber:Number(String(test.code || '').match(/_BAI_(\d+)$/i)?.[1]), subject:subjects[test.subjectCode] || test.subjectCode, title:test.title, date:test.date, score:entry.score, classAverage:test.classAverage, note:entry.note || ''});
-        });
-        // The score book is authoritative when present; older imports use state.scores.
-        if (!row) rows.push(...(data.scores || []).filter(s => String(s.studentCode || '').trim() === code));
-        return rows.map(s => ({...s, value:Number(String(s.score).replace(',', '.')), day:date(s.date)}))
-            .filter(s => String(s.score ?? '').trim() !== '' && Number.isFinite(s.value) && s.value >= 0 && s.value <= 10);
+        return window.ClassHubModel.savedScoreRows(data,student)
+            .map(s=>({...s,subject:subjects[s.subjectCode]||s.subject||s.subjectCode,value:s.score,day:date(s.date)}));
     }
     const homeworkLabels = {done:'Hoàn thành',missing:'Chưa làm',partial:'Làm chưa đủ',supplemented:'Đã bổ sung'};
     const homeworkFault = status => status === 'missing' || status === 'partial';

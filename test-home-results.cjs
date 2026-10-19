@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 let profileScores, profileConduct;
-const context = {state:{}, Intl, Date, showParentView(){profileScores=context.state.scores;}, isParentPortalMode(){return false;}, document:{querySelector(){return {insertAdjacentHTML(position,html){profileConduct=html;}};}}, toInlineJsValue:value=>JSON.stringify(value)};
+const context = {ClassHubModel:require('./class-hub-model.js'),state:{}, Intl, Date, showParentView(){profileScores=context.state.scores;}, isParentPortalMode(){return false;}, document:{querySelector(){return {insertAdjacentHTML(position,html){profileConduct=html;}};}}, toInlineJsValue:value=>JSON.stringify(value)};
 context.window=context;
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(__dirname+'/home-results.js','utf8'),context);
@@ -64,6 +64,17 @@ const invalidReport=context.homeResultsModel(extraOptional,now);
 assert.equal(invalidReport.unconfigured.length,1);
 assert.equal(invalidReport.academic[0].details.length,1); // Only mandatory subjects until the oversized old selection is fixed.
 assert.equal(invalidReport.academic[0].details[0].includes('Văn'),true);
+// Reports share the latest saved source; drafts and removed marks do not leak back in.
+const sharedStudent={id:1,studentCode:'001',name:'An'};
+const savedBook=(mark)=>({loaded:true,tests:[{code:'TOAN_BAI_01',subjectCode:'TOAN',date:'2026-10-01',title:'Đã lưu'}],students:[{studentCode:'001',scores:{TOAN_BAI_01:{score:mark,note:'Ghi chú'}}}]});
+const shared={students:[sharedStudent],scoreBook:{...savedBook(9),updatedAt:'2026-10-01'},hubScoreSource:{loaded:true,updatedAt:'2026-10-02',scoreBook:savedBook(3)},scoreDrafts:{TOAN_BAI_01:{'001':{score:10}}}};
+assert.equal(context.homeResultsModel(shared,now).academic.length,1);
+assert.equal(context.ClassHubModel.scores(shared,sharedStudent)[0].score,3);
+context.state=shared;context.showParentView(1);assert.equal(profileScores[0].score,3);assert.equal(profileScores[0].note,'Ghi chú');
+shared.scoreBook.updatedAt='2026-10-03';assert.equal(context.homeResultsModel(shared,now).academic.length,0);assert.equal(context.ClassHubModel.scores(shared,sharedStudent)[0].score,9);
+shared.scoreBook.tests[0].localOnly=true;assert.equal(context.ClassHubModel.scores(shared,sharedStudent).length,0);assert.equal(context.homeResultsModel(shared,now).academic.length,0);
+shared.hubScoreSource.updatedAt='2026-10-04';shared.hubScoreSource.scoreBook={loaded:true,tests:[],students:[]};shared.scores=[score('2026-10-01',1)];assert.equal(context.ClassHubModel.scores(shared,sharedStudent).length,0);assert.equal(context.homeResultsModel(shared,now).academic.length,0);
+assert.equal(shared.scoreDrafts.TOAN_BAI_01['001'].score,10);
 const html=fs.readFileSync(__dirname+'/index.html','utf8');
 for(const script of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) new vm.Script(script[1]);
 console.log('Passed: warning thresholds, subject isolation, date boundaries, invalid/blank scores, progress, conduct and score-book authority; inline scripts parse.');

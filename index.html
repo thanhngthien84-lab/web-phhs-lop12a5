@@ -1558,6 +1558,8 @@ function scoreMerge(remote, previous, removedCode) {
     return remote;
 }
 function scoreApply(response, old, removedCode, selection) {
+    // Capture the server response before scoreMerge adds unsaved local-only tests.
+    state.hubScoreSource={loaded:true,updatedAt:new Date().toISOString(),scoreBook:JSON.parse(JSON.stringify(response.scoreBook))};
     state.scoreBook=scoreMerge(response.scoreBook,old,removedCode);
     Object.assign(state.scoreBook,{selectedSubject:old.selectedSubject||'TOAN',selectedTestCode:selection || old.selectedTestCode||'',loaded:true,loading:false,updatedAt:response.updatedAt});
     saveData(); if(state.currentTab==='diem-hoc-tap' && (!window.learningSection || window.learningSection==='scores')) renderLayout();
@@ -8644,8 +8646,8 @@ window.deleteHistoryRecord = function(studentId,historyId) {
     saveData();renderLayout();openStudentHistoryModal(studentId);showToast('Đã hoàn tác và giữ lịch sử đối chiếu.','success');
 };
     </script>
-<script src="home-results.js?v=protect-20261018"></script>
-<script src="class-hub-model.js?v=20261018-protect1"></script>
+<script src="home-results.js?v=shared-scores-20261019"></script>
+<script src="class-hub-model.js?v=shared-scores-20261019"></script>
 <script src="class-hub-rules-ui.js?v=20261018-protect1"></script>
 <script src="class-hub.js?v=20261018-protect1"></script>
 </body>
