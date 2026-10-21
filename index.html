@@ -1312,6 +1312,14 @@ async function loadParentClassHomework() {
 }
 
 
+window.changeScoreEntrySort = function (mode) {
+    if (!['full-name', 'given-name'].includes(mode) || scoreSyncBusy) return;
+    // Capture the visible inputs by student code before moving any rows.
+    if (document.querySelector('[data-score-field]')) scoreDraftChanged();
+    window.scoreEntrySortMode = mode;
+    renderLayout();
+};
+
 function renderViewScoreEntry() {
     const book = state.scoreBook || {};
     const subjects = [
@@ -1368,7 +1376,11 @@ function renderViewScoreEntry() {
 ];
     const orderNameKey = name => String(name || "").normalize("NFC").trim().replace(/\s+/g, " ").toLocaleLowerCase("vi");
     const orderRank = new Map(scoreEntryOrder.map((name, index) => [orderNameKey(name), index]));
-    students.sort((a, b) => (orderRank.get(orderNameKey(a.name)) ?? Infinity) - (orderRank.get(orderNameKey(b.name)) ?? Infinity));
+    const fullNameSort = window.scoreEntrySortMode !== 'given-name';
+    const nameCollator = new Intl.Collator('vi', { sensitivity: 'variant', numeric: true });
+    students.sort((a, b) => fullNameSort
+        ? nameCollator.compare(orderNameKey(a.name), orderNameKey(b.name)) || nameCollator.compare(String(a.studentCode), String(b.studentCode))
+        : (orderRank.get(orderNameKey(a.name)) ?? Infinity) - (orderRank.get(orderNameKey(b.name)) ?? Infinity));
     // Only the current class roster determines which students appear here.
     const savedScores = [];
     if (selectedTest && selectedTest.code && selectedTest.code !== "__new__") {
@@ -1425,6 +1437,7 @@ function renderViewScoreEntry() {
         '<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full"><button onclick="openConnectedGoogleSheet()" class="px-4 py-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold text-sm flex items-center justify-center gap-2"><i class="ph-bold ph-table"></i> Mở Google Sheet</button>' +
         '<button onclick="loadScoreBookFromGoogle()" ' + (loading ? "disabled" : "") + ' class="px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60"><i class="ph-bold ph-arrows-clockwise ' + (loading ? "animate-spin" : "") + '"></i> Tải điểm mới nhất</button>' +
         '<button onclick="openNewScoreTestModal()" class="px-4 py-3 rounded-xl bg-[#0f172a] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"><i class="ph-bold ph-plus-circle"></i> Tạo bài kiểm tra</button></div></div>' +
+        '<label class="flex flex-wrap items-center gap-3 mt-5 text-sm font-bold text-slate-700">Sắp xếp học sinh<select aria-label="Sắp xếp học sinh" onchange="changeScoreEntrySort(this.value)" class="px-3 py-2.5 rounded-xl border border-slate-200 bg-white"><option value="full-name" ' + (fullNameSort ? 'selected' : '') + '>Họ và tên A–Z (như Excel)</option><option value="given-name" ' + (!fullNameSort ? 'selected' : '') + '>Thứ tự tên trước đây</option></select></label>' +
         '<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[220px_minmax(280px,1fr)_repeat(4,minmax(120px,160px))] gap-3 mt-6 items-stretch">' +
         '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Môn học</span><select onchange="selectScoreSubject(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700">' + subjectOptions + '</select></label>' +
         '<label><span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Bài kiểm tra</span><select onchange="selectScoreTest(this.value)" class="mt-2 w-full px-4 py-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-700" ' + (!subjectTests.length ? "disabled" : "") + '>' +
